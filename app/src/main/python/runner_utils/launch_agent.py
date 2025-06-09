@@ -2,6 +2,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 from agent_entry import AgentEntry  # Assuming AgentEntry is defined elsewhere
+import os
 
 
 def run_command(cmd: list[str], cwd: Optional[Path] = None):
@@ -33,7 +34,8 @@ def launch_agent(agent: AgentEntry, base_dir: Path):
         run_command(["git", "checkout", agent.commit], cwd=repo_dir)
 
     if gradlew_path.exists():
-        run_command(["./gradlew", "build"], cwd=repo_dir)
+        gradle_cmd = "gradlew.bat" if os.name == 'nt' else "./gradlew"
+        run_command([gradle_cmd, "build"], cwd=repo_dir)
     else:
         raise RuntimeError(f"{gradlew_path} does not exist. Ensure the repo contains the Gradle wrapper.")
 
