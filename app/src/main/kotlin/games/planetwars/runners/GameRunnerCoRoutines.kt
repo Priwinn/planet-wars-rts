@@ -14,6 +14,7 @@ data class GameRunnerCoRoutines(
     val agent2: PlanetWarsAgent,
     val gameParams: GameParams,
     val timeoutMillis: Long = 500, // Timeout for agent responses
+    val debug: Boolean = false
 ) {
     var gameState: GameState = GameStateFactory(gameParams).createGame()
     var forwardModel: ForwardModel = ForwardModel(gameState.deepCopy(), gameParams)
@@ -72,6 +73,9 @@ data class GameRunnerCoRoutines(
 
     fun newGame() {
         forwardModel = ForwardModel(gameState.deepCopy(), gameParams)
+
+        agent1.prepareToPlayAs(Player.Player1, gameParams)
+        agent2.prepareToPlayAs(Player.Player2, gameParams)
     }
 
     fun stepGame(): ForwardModel {
@@ -80,6 +84,7 @@ data class GameRunnerCoRoutines(
         }
         runBlocking {
             val actions = getTimedActions(forwardModel.state)
+            if (debug) println("Actions: ${actions[Player.Player1]}, ${actions[Player.Player2]}")
             forwardModel.step(actions)
         }
         return forwardModel

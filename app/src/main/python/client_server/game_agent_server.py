@@ -71,4 +71,4 @@ class GameServerAgent:
 
 
 if __name__ == "__main__":
-    asyncio.run(GameServerAgent().start())
+    asyncio.run(GameServerAgent(port=8080).start())

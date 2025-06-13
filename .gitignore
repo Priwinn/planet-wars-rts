@@ -33,6 +33,7 @@ replay_pid*
 
 # Ignore Gradle build output directory
 build/
+bin/
 
 # Ignore IntelliJ IDEA files
 .idea/
@@ -81,3 +82,6 @@ __pycache__/
 *.pyo
 *.pyd
 *.pyc
+
+runs/
+models/

@@ -47,6 +47,9 @@ dependencies {
 
     // Additional Libraries
     implementation("com.google.guava:guava:32.1.2-jre")
+
+    //Python Integration
+    implementation("net.sf.py4j:py4j:0.10.9.7")
 }
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
@@ -54,12 +57,12 @@ tasks.withType<Test>().configureEach {
 
 tasks.withType<Jar> {
     manifest {
-        attributes["Main-Class"] = "client_server.MultiRTSServer"
+        attributes["Main-Class"] = "games.planetwars.runners.Py4JGatewayServerKt"
     }
 }
 
 tasks.named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("shadowJar") {
-    archiveBaseName.set("client-server")
+    archiveBaseName.set("py4J-gateway-server")
     archiveClassifier.set("")
     archiveVersion.set("")
 }
@@ -73,12 +76,12 @@ tasks.named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("shadowJ
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(20) // Downgraded to Java 20 for compatibility
+        languageVersion = JavaLanguageVersion.of(21) // Downgraded to Java 20 for compatibility
     }
 }
 
 application {
-    mainClass.set("competition_entry.RunEntryAsServerKt") // Adjust this if your package structure is different
+    mainClass.set("games.planetwars.runners.Py4JGatewayServerKt") // Adjust this if your package structure is different
 }
 
 kotlin {

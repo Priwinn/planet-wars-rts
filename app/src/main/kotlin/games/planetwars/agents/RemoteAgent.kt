@@ -32,7 +32,8 @@ fun main() {
 class RemoteAgent(
     private val className: String,
     private val port: Int = 8080,
-    private val logger: JsonLogger = JsonLogger() // default: ignore = true
+    private val logger: JsonLogger = JsonLogger(), // default: ignore = true
+    private val debug: Boolean = false, 
 ) : PlanetWarsPlayer() {
 
     private val serverUrl: String = "ws://localhost:$port/ws"
@@ -75,7 +76,7 @@ class RemoteAgent(
                 val result = jsonResp["result"]
                 if (result != null && result is JsonObject) {
                     action = json.decodeFromJsonElement(Action.serializer(), result)
-                    println("Decoded Action: $action")
+                    if (debug) println("Action received: $action")
                 }
             }
             action

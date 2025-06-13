@@ -35,6 +35,16 @@ class Player(str, Enum):
     Player2 = "Player2"
     Neutral = "Neutral"
 
+    # @property
+    # def value(self) -> int:
+    #     """Return numeric value for the player"""
+    #     if self == Player.Player1:
+    #         return 1
+    #     elif self == Player.Player2:
+    #         return 2
+    #     else:  # Neutral
+    #         return 0
+
     def opponent(self) -> Player:
         if self == Player.Player1:
             return Player.Player2
@@ -42,6 +52,7 @@ class Player(str, Enum):
             return Player.Player1
         else:
             raise ValueError("Neutral has no opponent")
+
 
 
 # --- Data classes ---
