@@ -87,6 +87,11 @@ class RemoteAgent(
 
     override fun getAgentType(): String = runBlocking {
         ensureConnected()
+        if (!::objectId.isInitialized) {
+            // call prepare to play as
+            prepareToPlayAs(Player.Player1, GameParams(), opponent = "RemoteAgent")
+        }
+        println("In Remote Agent, object id: $objectId")
         var agentType = "Remote[$className]" // fallback
         client.webSocket(serverUrl) {
             session = this
@@ -97,7 +102,7 @@ class RemoteAgent(
                 agentType = result.toString().trim('"')  // remove surrounding quotes
             }
         }
-        agentType
+        "$agentType (Remote)"
     }
 
     override fun processGameOver(finalState: GameState) {

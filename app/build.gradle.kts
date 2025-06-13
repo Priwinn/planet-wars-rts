@@ -87,3 +87,9 @@ application {
 kotlin {
     jvmToolchain(20) // Ensure Kotlin targets JVM 20 as well
 }
+
+tasks.register<JavaExec>("runEvaluation") {
+    mainClass.set("games.planetwars.runners.EvaluateAgentKt")
+    classpath = sourceSets["main"].runtimeClasspath
+    args = listOf(project.findProperty("args")?.toString() ?: "9003")
+}

@@ -82,6 +82,7 @@ __pycache__/
 *.pyo
 *.pyd
 *.pyc
+app/src/main/python/runner_utils/competition_entries.py
 
 runs/
 models/

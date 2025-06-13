@@ -1,6 +1,7 @@
 package games.planetwars.runners
 
 
+import competition_entry.GreedyHeuristicAgent
 import games.planetwars.agents.Action
 import games.planetwars.agents.DoNothingAgent
 import games.planetwars.agents.PlanetWarsAgent
@@ -13,18 +14,29 @@ import kotlin.system.measureTimeMillis
 
 
 fun main() {
-    val gameParams = GameParams(numPlanets = 20, maxTicks = 500)
+    val gameParams = GameParams(numPlanets = 20, maxTicks = 2000)
 //    val agent1 = DoNothingAgent()
-    val agent1 = PureRandomAgent()
-    val agent2 = RemoteAgent("<specified by remote server>", port = 8080)
+//    val agent1 = PureRandomAgent()
+    val agent1 = GreedyHeuristicAgent()
+    val agent2 = RemoteAgent("<specified by remote server>", port = 9003)
     val gameRunner = GameRunnerCoRoutines(agent1, agent2, gameParams, timeoutMillis = 10)
     val finalModel = gameRunner.runGame()
     println("Game over!")
     println(finalModel.statusString())
 
     // time to run a bunch of games
-    val nGames = 3
+    val nGames = 10
     val results = gameRunner.runGames(nGames)
     println(results)
     print(agent2.getAgentType())
+    // try them in the other order
+
+    val gameRunnerSwitched = GameRunnerCoRoutines(agent2, agent1, gameParams, timeoutMillis = 10)
+    val finalModelSwitched = gameRunnerSwitched.runGame()
+    println("Game over (switched)!")
+    println(finalModelSwitched.statusString())
+    // time to run a bunch of games
+    val resultsSwitched = gameRunnerSwitched.runGames(nGames)
+    println(resultsSwitched)
+
 }

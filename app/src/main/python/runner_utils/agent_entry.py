@@ -1,19 +1,21 @@
 from pydantic import BaseModel
 from typing import List, Optional
 
+
 class AgentEntry(BaseModel):
     id: str
     repo_url: str
-    port: int
+    # port: int
     commit: Optional[str] = None  # ← optional commit hash
 
+
 sample_entries: List[AgentEntry] = [
-AgentEntry(
+    AgentEntry(
         id="agent2",
         repo_url="https://github.com/SimonLucas/planet-wars-rts",
-        port=9002,
-    )
+    ),
 ]
+
 
 if __name__ == "__main__":
     print(sample_entries)

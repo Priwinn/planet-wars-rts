@@ -3,6 +3,7 @@ package games.planetwars.runners
 import competition_entry.GreedyHeuristicAgent
 import games.planetwars.agents.DoNothingAgent
 import games.planetwars.agents.PlanetWarsAgent
+import games.planetwars.agents.RemoteAgent
 import games.planetwars.agents.evo.SimpleEvoAgent
 import games.planetwars.agents.random.BetterRandomAgent
 import games.planetwars.agents.random.CarefulRandomAgent
@@ -11,11 +12,18 @@ import games.planetwars.core.GameParams
 import games.planetwars.core.Player
 
 fun main() {
+
+    val gameParams = GameParams(numPlanets = 20, maxTicks = 2000)
+
     val agents = SamplePlayerLists().getRandomTrio()
+
     agents.add(GreedyHeuristicAgent())
+    val remoteAgent = RemoteAgent("<specified by remote server>", port = 9003)
+
+    agents.add(remoteAgent)
 //    val agents = SamplePlayerLists().getFullList()
 //    agents.add(DoNothingAgent())
-    val league = RoundRobinLeague(agents, gamesPerPair = 100)
+    val league = RoundRobinLeague(agents, gameParams = gameParams, gamesPerPair = 10, runRemoteAgents = true)
     val results = league.runRoundRobin()
     // use the League utils to print the results
     println(results)
@@ -33,6 +41,14 @@ fun main() {
 
 class SamplePlayerLists {
     fun getRandomTrio(): MutableList<PlanetWarsAgent> {
+        return mutableListOf(
+            PureRandomAgent(),
+            BetterRandomAgent(),
+            CarefulRandomAgent(),
+        )
+    }
+
+    fun getSamplePlayers(): MutableList<PlanetWarsAgent> {
         return mutableListOf(
             PureRandomAgent(),
             BetterRandomAgent(),
@@ -60,10 +76,17 @@ data class RoundRobinLeague(
     val agents: List<PlanetWarsAgent>,
     val gamesPerPair: Int = 10,
     val gameParams: GameParams = GameParams(numPlanets = 20),
+    val runRemoteAgents: Boolean = false, // if true, will run remote agents
+    val timeout: Long = 10, // timeout in milliseconds for remote agents
 ) {
     fun runPair(agent1: PlanetWarsAgent, agent2: PlanetWarsAgent): Map<Player, Int> {
-        val gameRunner = GameRunner(agent1, agent2, gameParams)
-        return gameRunner.runGames(gamesPerPair)
+        if (runRemoteAgents) {
+            val gameRunner = GameRunnerCoRoutines(agent1, agent2, gameParams, timeoutMillis = timeout)
+            return gameRunner.runGames(gamesPerPair)
+        } else {
+            val gameRunner = GameRunner(agent1, agent2, gameParams)
+            return gameRunner.runGames(gamesPerPair)
+        }
     }
 
     fun runRoundRobin(): Map<String, LeagueEntry> {
