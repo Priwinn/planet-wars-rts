@@ -13,13 +13,14 @@ from core.game_state import Player, Action
 class KotlinForwardModelBridge:
     """Bridge to interact with Kotlin ForwardModel for local game simulation using JPype"""
     
-    def __init__(self, jar_path: str = None, auto_start_jvm: bool = True):
+    def __init__(self, jar_path: str = None, auto_start_jvm: bool = True, fixed_map: bool = False):
         self.jar_path = jar_path or self._find_jar_path()
         self.forward_model = None
         self.game_state = None
         self.game_params = None
         self._jvm_started = False
         self.initial_game_state = None
+        self.fixed_map = fixed_map
         
         if auto_start_jvm:
             self.start_jvm()
@@ -28,7 +29,8 @@ class KotlinForwardModelBridge:
     
     def _find_jar_path(self) -> str:
         """Find the built JAR file"""
-        workspace_root = r"c:\Users\Ruizhe\Desktop\workspace\planet-wars-rts"
+        workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", ".."))
+        print(f"Workspace root: {workspace_root}")
         jar_path = os.path.join(workspace_root, "app", "build", "libs", "app.jar")
         if not os.path.exists(jar_path):
             # Try alternative path
@@ -42,11 +44,14 @@ class KotlinForwardModelBridge:
             self._jvm_started = True
         
         # Import required Java classes
-        from games.planetwars.core import GameState, GameParams, ForwardModel, Player as KotlinPlayer
-        from games.planetwars.core import GameStateFactory
-        from games.planetwars.agents import Action as KotlinAction
-        from java.util import HashMap
-        
+        GameState = jpype.JClass("games.planetwars.core.GameState")
+        GameParams = jpype.JClass("games.planetwars.core.GameParams")
+        ForwardModel = jpype.JClass("games.planetwars.core.ForwardModel")
+        KotlinPlayer = jpype.JClass("games.planetwars.core.Player")
+        GameStateFactory = jpype.JClass("games.planetwars.core.GameStateFactory")
+        KotlinAction = jpype.JClass("games.planetwars.agents.Action")
+        HashMap = jpype.JClass("java.util.HashMap")
+
         # Store references to Java classes
         self.GameState = GameState
         self.GameParams = GameParams
@@ -67,9 +72,9 @@ class KotlinForwardModelBridge:
         else:
             self.game_params = self._create_game_params_from_dict(game_params)
         
-        #We currently fix the generated map, in the future we can add a parameter to generate a new map each time
+
         # Create game state 
-        if self.initial_game_state is not None:
+        if self.initial_game_state is not None and self.fixed_map:
             # If we have an initial game state, use it
             self.game_state = self.initial_game_state.deepCopy()
         else:

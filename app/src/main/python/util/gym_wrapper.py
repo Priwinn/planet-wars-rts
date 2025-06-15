@@ -203,7 +203,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
         owned_planets = [
             p for p in planets 
             if (p['owner'] == player_int and 
-                p['numShips'] > 5000 and 
+                p['numShips'] > 0 and 
                 p.get('transporter') is None)
         ]
         
@@ -376,7 +376,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
             owner = planet['owner']
             
             # Base score: ships + growth potential
-            planet_value = 1*planet['numShips'] + planet['growthRate'] * 1000
+            planet_value = 1*planet['numShips'] + planet['growthRate'] * 100
             
             if owner == self.player_int:
                 controlled_player_score += planet_value
@@ -412,7 +412,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
         self.previous_score = current_score
         
         # If game is terminal, give a final reward based on outcome
-        if game_state['isTerminal']:
+        if game_state['isTerminal'] or game_state['tick'] >= self.max_ticks:
             if game_state['leader'] == self.player_int:
                 return 1.0
             elif game_state['leader'] == self.opponent_int:

@@ -62,7 +62,7 @@ tasks.withType<Jar> {
 }
 
 tasks.named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("shadowJar") {
-    archiveBaseName.set("py4J-gateway-server")
+    archiveBaseName.set("app")
     archiveClassifier.set("")
     archiveVersion.set("")
 }
@@ -76,7 +76,7 @@ tasks.named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("shadowJ
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21) // Downgraded to Java 20 for compatibility
+        languageVersion = JavaLanguageVersion.of(20) // Downgraded to Java 20 for compatibility
     }
 }
 

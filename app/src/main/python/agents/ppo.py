@@ -2,6 +2,7 @@ import os
 import random
 import time
 from dataclasses import dataclass
+import sys
 
 import gymnasium as gym
 import numpy as np
@@ -9,12 +10,14 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import tyro
+from typing import List
 from torch.distributions.categorical import Categorical
 from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
 from util.gym_wrapper import PlanetWarsForwardModelEnv
 from core.game_state import Player
+from agents.mlp import PlanetWarsAgentMLP
 
 
 @dataclass
@@ -25,11 +28,11 @@ class Args:
     """seed of the experiment"""
     torch_deterministic: bool = True
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
-    cuda: bool = False
+    cuda: bool = True
     """if toggled, cuda will be enabled by default"""
-    track: bool = False
+    track: bool = True
     """if toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "cleanRL"
+    wandb_project_name: str = "planet-wars-ppo"
     """the wandb's project name"""
     wandb_entity: str = None
     """the entity (team) of wandb's project"""
@@ -39,11 +42,11 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "PlanetWarsForwardModel"
     """the id of the environment"""
-    total_timesteps: int = 1000000
+    total_timesteps: int = 5000000
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
-    num_envs: int = 2
+    num_envs: int = 6
     """the number of parallel game environments"""
     num_steps: int = 256
     """the number of steps to run in each environment per policy rollout"""
@@ -73,7 +76,7 @@ class Args:
     """the target KL divergence threshold"""
 
     # Planet Wars specific
-    num_planets: int = 6
+    num_planets: int = 20
     """number of planets in the game"""
     node_feature_dim: int = 13
     """dimension of node features (owner, ship_count, growth_rate, x, y)"""
@@ -212,152 +215,8 @@ class PlanetWarsActionWrapper(gym.Wrapper):
     
 
 
-def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-    torch.nn.init.orthogonal_(layer.weight, std)
-    torch.nn.init.constant_(layer.bias, bias_const)
-    return layer
-
-
-class PlanetWarsAgent(nn.Module):
-    """Neural network agent with action masking"""
-    
-    def __init__(self, args):
-        super().__init__()
-        self.args = args
-        
-        # Input dimensions based on whether adjacency matrix is used
-        node_features_dim = args.num_planets * args.node_feature_dim
-        total_input_dim = node_features_dim
-        
-        if args.use_adjacency_matrix:
-            adj_matrix_dim = args.num_planets * args.num_planets
-            total_input_dim += adj_matrix_dim
-        
-        # Adjust network size based on input dimension
-        hidden_size = 512 if args.use_adjacency_matrix else 256
-        
-        # Shared feature extraction
-        self.feature_extractor = nn.Sequential(
-            layer_init(nn.Linear(total_input_dim, hidden_size)),
-            nn.ReLU(),
-            layer_init(nn.Linear(hidden_size, 256)),
-            nn.ReLU(),
-            layer_init(nn.Linear(256, 128)),
-            nn.ReLU(),
-        )
-        
-        # Value head
-        self.critic = nn.Sequential(
-            layer_init(nn.Linear(128, 64)),
-            nn.ReLU(),
-            layer_init(nn.Linear(64, 1), std=1.0),
-        )
-        
-        # Policy heads
-        self.source_actor = nn.Sequential(
-            layer_init(nn.Linear(128, 64)),
-            nn.ReLU(),
-            layer_init(nn.Linear(64, args.num_planets), std=0.01),
-        )
-        
-        self.target_actor = nn.Sequential(
-            layer_init(nn.Linear(128, 64)),
-            nn.ReLU(),
-            layer_init(nn.Linear(64, args.num_planets), std=0.01),
-        )
-        
-        # Ship ratio (continuous)
-        self.ratio_actor_mean = nn.Sequential(
-            layer_init(nn.Linear(128, 64)),
-            nn.ReLU(),
-            layer_init(nn.Linear(64, 1), std=0.01),
-        )
-        self.ratio_actor_logstd = nn.Parameter(torch.zeros(1))  # Log std for ratio action
-
-    def get_value(self, x):
-        features = self.feature_extractor(x)
-        return self.critic(features)
-
-
-    def get_action_and_value(self, x, action=None):
-        features = self.feature_extractor(x)
-        
-        # Get action distributions
-        source_logits = self.source_actor(features)
-        target_logits = self.target_actor(features)
-        ratio_mean = torch.sigmoid(self.ratio_actor_mean(features))  # Ensure 0-1 range
-        
-
-        #Get source mask, target mask depends on source mask
-        planet_owners = x[:, ::self.args.node_feature_dim]  # owner info is on dimensions positions pos s.t. pos % num_features_dim==0
-        source_mask = planet_owners == 1  # Mask for source actions (only own planets)
-
-        # Create masked distributions
-        # TODO: disallow sending transporters to themselves
-        source_probs = MaskedCategorical(logits=source_logits, mask=source_mask)
-        
-        # Ratio distribution
-        ratio_std = torch.clamp(self.ratio_actor_logstd.exp(), min=0.01, max=0.5)
-        ratio_probs = Normal(ratio_mean, ratio_std)
-        
-        if action is None:
-            # Sample actions
-            source_action = source_probs.sample()
-            target_mask = planet_owners == 2  # Mask for target actions (only opponent planets)
-            target_mask[torch.arange(self.args.num_envs), source_action] = False  # Prevent sending to self
-            target_probs = MaskedCategorical(logits=target_logits, mask=target_mask)
-            target_action = target_probs.sample()
-            ratio_action = torch.clamp(ratio_probs.sample(), 0.0, 0.99)
-            action = torch.stack([source_action.float(), target_action.float(), ratio_action.squeeze(-1)], dim=-1)
-        else:
-            source_action = action[:, 0].long()
-            target_mask = planet_owners == 2
-            target_mask[torch.arange(self.args.minibatch_size), source_action] = False  # Prevent sending to self
-            target_probs = MaskedCategorical(logits=target_logits, mask=target_mask)
-            target_action = action[:, 1].long()
-            ratio_action = action[:, 2]
-        
-        # Calculate log probabilities
-        source_logprob = source_probs.log_prob(source_action)
-        target_logprob = target_probs.log_prob(target_action)
-        ratio_logprob = ratio_probs.log_prob(ratio_action).squeeze(-1)
-        
-        # Combined log probability
-        total_logprob = source_logprob + target_logprob + ratio_logprob
-        
-        # Combined entropy
-        total_entropy = source_probs.entropy() + target_probs.entropy() + ratio_probs.entropy().squeeze(-1)
-        
-        value = self.critic(features)
-        
-        return action, total_logprob, total_entropy, value
-
-
-class MaskedCategorical(Categorical):
-    """Categorical distribution with action masking"""
-    
-    def __init__(self, logits=None, probs=None, mask=None):
-        if mask is not None:
-            # Set logits of invalid actions to very negative values
-            if logits is not None:
-                logits = torch.where(mask, logits, torch.tensor(-1e8, device=logits.device))
-            elif probs is not None:
-                probs = torch.where(mask, probs, torch.tensor(1e-8, device=probs.device))
-        
-        super().__init__(logits=logits, probs=probs)
-        self.mask = mask
-    
-    def entropy(self):
-        # Only calculate entropy for valid actions
-        if self.mask is not None:
-            # Get probabilities and zero out invalid actions
-            p_log_p = self.logits * self.probs
-            p_log_p = torch.where(self.mask, p_log_p, torch.tensor(0.0, device=p_log_p.device))
-            return -p_log_p.sum(-1)
-        return super().entropy()
-
-
 if __name__ == "__main__":
+
     args = tyro.cli(Args)
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
@@ -395,7 +254,7 @@ if __name__ == "__main__":
         [make_env(args.env_id, i, args.capture_video, run_name, args) for i in range(args.num_envs)],
     )
 
-    agent = PlanetWarsAgent(args).to(device)
+    agent = PlanetWarsAgentMLP(args).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # Storage setup
@@ -412,6 +271,8 @@ if __name__ == "__main__":
     next_obs, _ = envs.reset(seed=args.seed)
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
+    curriculum_step = 0
+    lesson_number = 0
 
     # Track performance metrics
     episode_rewards = []
@@ -432,6 +293,7 @@ if __name__ == "__main__":
 
         for step in range(0, args.num_steps):
             global_step += args.num_envs
+            curriculum_step += args.num_envs
             obs[step] = next_obs
             dones[step] = next_done
 
@@ -463,11 +325,21 @@ if __name__ == "__main__":
                         print(f"global_step={global_step}, episodic_return={episode_reward:.3f}, length={episode_length}, win={win}")
                         writer.add_scalar("charts/episodic_return", episode_reward, global_step)
                         writer.add_scalar("charts/episodic_length", episode_length, global_step)
-                        
-                        # Calculate recent win rate (last 10 episodes)
-                        if len(win_rate) >= 10:
-                            recent_win_rate = np.mean(win_rate[-10:])
-                            writer.add_scalar("charts/win_rate", recent_win_rate, global_step)
+
+                        # Calculate recent win rate (last 50 episodes)
+                        recent_win_rate = np.mean(win_rate[-50:]) if len(win_rate) >= 50 else np.mean(win_rate) if win_rate else 0.0
+                        writer.add_scalar("charts/win_rate", recent_win_rate, global_step)
+                         # Reset curriculum step if win rate is good and move to next curriculum step
+                        if recent_win_rate >= 0.9 and len(win_rate) >= 50 and args.opponent_type == "random":
+                            curriculum_step = 0
+                            args.opponent_type = "greedy"  # Switch to greedy opponent
+                            lesson_number += 1
+                            print(f"Curriculum step {curriculum_step} completed, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
+                            envs.close()
+                            envs = gym.vector.SyncVectorEnv(
+                                [make_env(args.env_id, i, args.capture_video, run_name, args) for i in range(args.num_envs)],
+                            )
+
 
         # Bootstrap value if not done
         with torch.no_grad():
@@ -571,21 +443,23 @@ if __name__ == "__main__":
         
         # Print progress
         if iteration % 10 == 0:
-            wr = np.mean(win_rate[-10:]) if len(win_rate) >= 10 else np.mean(win_rate) if win_rate else 0.0
+            wr = np.mean(win_rate[-50:]) if len(win_rate) >= 50 else np.mean(win_rate) if win_rate else 0.0
             print(f"Iteration {iteration}/{args.num_iterations}")
             print(f"  SPS: {steps_per_second}")
             print(f"  Mean reward: {mean_reward:.3f}")
             print(f"  Recent win rate: {wr:.3f}")
             print(f"  Learning rate: {optimizer.param_groups[0]['lr']:.6f}")
+        sys.stdout.flush()
 
         # Save model checkpoint
-        if iteration % 100 == 0:
+        if iteration % 500 == 0:
             torch.save({
                 'iteration': iteration,
                 'model_state_dict': agent.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'args': args,
             }, f"models/{run_name}_iter_{iteration}.pt")
+        
 
     # Save final model
     os.makedirs("models", exist_ok=True)

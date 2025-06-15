@@ -86,3 +86,7 @@ app/src/main/python/runner_utils/competition_entries.py
 
 runs/
 models/
+bash_scripts/
+venv/
+logs/
+wandb/
