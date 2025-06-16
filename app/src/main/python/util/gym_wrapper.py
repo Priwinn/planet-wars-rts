@@ -4,19 +4,13 @@ import networkx as nx
 from typing import Dict, Any, Tuple, List, Optional
 from dataclasses import dataclass
 import time
+import torch
 
 from util.KotlinForwardModelBridge import KotlinForwardModelBridge
 from torch_geometric.data import Data
 from core.game_state import Player, Action
 
-@dataclass
-class GraphObservation:
-    """Observation containing graph representation of the game state"""
-    graph: nx.Graph
-    node_features: np.ndarray  # Shape: (num_planets, feature_dim)
-    edge_features: np.ndarray  # Shape: (num_edges, edge_feature_dim)
-    adjacency_matrix: np.ndarray
-    torch_geometric_data: Optional[Data] = None
+
 
 class PlanetWarsForwardModelEnv(gym.Env):
     """
@@ -46,7 +40,8 @@ class PlanetWarsForwardModelEnv(gym.Env):
         self.max_ticks = max_ticks
         self.opponent_policy = opponent_policy or self._random_opponent_policy
         self.previous_score = 0.0
-        
+        self.edge_index = torch.Tensor([[i, j] for i in range(game_params['numPlanets']) for j in range(game_params['numPlanets']) if i != j]).long().permute(1, 0)
+
         # Game parameters #TODO: Params is not exposed to the Kotlin side, so we need to set them here
         self.game_params = game_params or {
             'maxTicks': max_ticks,
@@ -97,7 +92,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
             )
         })
 
-    def reset(self, **kwargs) -> Tuple[GraphObservation, Dict[str, Any]]:
+    def reset(self, **kwargs) -> Tuple[Data, Dict[str, Any]]:
         """Reset the environment and return initial observation"""
         self.kotlin_bridge.create_new_game(self.game_params)
         initial_state = self.kotlin_bridge.get_game_state()
@@ -111,7 +106,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
             'player2Ships': initial_state['player2Ships']
         }
     
-    def step(self, action: np.ndarray) -> Tuple[GraphObservation, float, bool, bool, Dict[str, Any]]:
+    def step(self, action: np.ndarray) -> Tuple[Data, float, bool, bool, Dict[str, Any]]:
         """Execute one step in the environment"""
         
         # Convert gym action to game action for controlled player
@@ -284,57 +279,92 @@ class PlanetWarsForwardModelEnv(gym.Env):
             num_ships=num_ships
         )
     
-    def _get_observation(self) -> GraphObservation:
+    def _get_observation(self) -> Data:
         """Create graph observation from current game state"""
         game_state = self.kotlin_bridge.get_game_state()
         planets = game_state['planets']
+        node_features = torch.Tensor(np.stack([self._get_planet_features(p) for p in planets], axis=0))
         
-        # Create graph
-        graph = nx.Graph()
         
-        # Add nodes (planets)
-        for i, planet in enumerate(planets):
-            graph.add_node(i, 
-                          owner=planet['owner'],
-                          ship_count=planet['numShips'],
-                          growth_rate=planet['growthRate'],
-                          x=planet['x'],
-                          y=planet['y'],
-                          transporter=planet.get('transporter', None))
-        
+        # Onehot owners
+        owners = self._owner_one_hot_encoding(node_features[:, 0].long())
+        node_features = torch.cat((owners, node_features[:, 1:]), dim=1)
+
         # Add edges with distance-based weights
-        for i in range(len(planets)):
-            for j in range(i + 1, len(planets)):
-                p1, p2 = planets[i], planets[j]
-                distance = np.sqrt((p1['x'] - p2['x'])**2 + (p1['y'] - p2['y'])**2)
+        # for i in range(len(planets)):
+        #     for j in range(i + 1, len(planets)):
+        #         p1, p2 = planets[i], planets[j]
+        #         distance = np.sqrt((p1['x'] - p2['x'])**2 + (p1['y'] - p2['y'])**2)
                 
-                # Skip if distance exceeds threshold
-                if self.max_distance_threshold and distance > self.max_distance_threshold:
-                    continue
+        #         # Skip if distance exceeds threshold
+        #         if self.max_distance_threshold and distance > self.max_distance_threshold:
+        #             continue
                 
-                # Calculate inverse distance weight
-                weight = 1.0 / (distance ** self.distance_power + 1e-8)
-                graph.add_edge(i, j, distance=distance, weight=weight)
+        #         # Calculate inverse distance weight
+        #         weight = 1.0 / (distance ** self.distance_power + 1e-8)
+        #         graph.add_edge(i, j, distance=distance, weight=weight)
         
         # Normalize weights if requested
-        if self.normalize_weights:
-            weights = [data['weight'] for _, _, data in graph.edges(data=True)]
-            if weights:
-                max_weight = max(weights)
-                for _, _, data in graph.edges(data=True):
-                    data['weight'] /= max_weight
+        # if self.normalize_weights:
+        #     weights = [data['weight'] for _, _, data in graph.edges(data=True)]
+        #     if weights:
+        #         max_weight = max(weights)
+        #         for _, _, data in graph.edges(data=True):
+        #             data['weight'] /= max_weight
         
         # Extract features
-        node_features = self._extract_node_features(graph)
-        adjacency_matrix = nx.adjacency_matrix(graph, weight='weight').todense()
         
-        return GraphObservation(
-            graph=graph,
-            node_features=node_features,
-            edge_features=np.array([]),  # Not needed for this version
-            adjacency_matrix=np.array(adjacency_matrix),
+        return Data(
+            x = node_features,
+            edge_index=self.edge_index,
         )
     
+    def _owner_one_hot_encoding(self, owner: torch.Tensor) -> torch.Tensor:
+        """Convert owner integer to one-hot encoding. Assume Neutral=0, Controlled=1, Opponent=2 (swaps controlled and opponent if needed)"""
+        one_hot = torch.nn.functional.one_hot(
+            owner.long(), num_classes=3
+        )
+        # Swap controlled and opponent if needed
+        if self.controlled_player == Player.Player2:
+            one_hot = one_hot[[0, 2, 1], :]
+        return one_hot
+    
+    def _planet_index_one_hot_encoding(self, planet_index: torch.Tensor) -> torch.Tensor:
+        """Convert planet index to one-hot encoding"""
+        return torch.nn.functional.one_hot(
+            planet_index.long(), num_classes=self.num_planets
+        )
+    
+    def _get_planet_features(self, planet: Dict[str, Any]) -> np.ndarray:
+        """Extract features from a single planet"""
+        features = [
+            planet['owner'],  # Owner ID
+            planet['numShips'],  # Number of ships
+            planet['growthRate'],  # Growth rate
+            planet['x'],  # X coordinate
+            planet['y']   # Y coordinate
+        ]
+        
+        # Add transporter info if available
+        if planet.get('transporter'):
+            transporter = planet['transporter']
+            features.extend([
+                transporter['owner'],
+                # transporter['sourceIndex'],
+                transporter['destinationIndex'], 
+                # TODO: Consider symmetry when controlled player changes either:
+                # 1.- Swap planet labels (if using onehot, obs vector is different size depending on num planets)
+                # 2.- Use edge features for transporters
+                transporter['numShips'],
+                transporter['x'],
+                transporter['y'],
+                transporter['vx'],
+                transporter['vy']
+            ])
+        else:
+            features.extend([0, 0, 0, 0, 0, 0, 0])
+        return np.array(features, dtype=np.float32)
+
     def _extract_node_features(self, graph: nx.Graph) -> np.ndarray:
         """Extract node features from graph"""
         features = []
@@ -477,7 +507,7 @@ if __name__ == "__main__":
     env.set_opponent_policy(env._greedy_opponent_policy)
     
     obs, info = env.reset()
-    print(f"Graph has {obs.graph.number_of_nodes()} nodes and {obs.graph.number_of_edges()} edges")
+    print(f"Graph has {len(obs.x)} nodes and {len(obs.edge_index)} edges")
     print(f"Initial state: {info}")
     
     # Simulate training loop

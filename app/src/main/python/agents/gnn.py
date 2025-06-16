@@ -4,13 +4,24 @@ import torch.nn.functional as F
 from torch.distributions import Normal, Categorical
 from torch_geometric.nn import GCNConv, GATConv, global_mean_pool, global_max_pool
 from torch_geometric.data import Data, Batch
-import numpy as np
+from typing import Tuple, Union, List
 
+import numpy as np
+from gymnasium.spaces import GraphInstance
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
+
+def GraphInstanceToPyG(graph_instance):
+    """Convert a GraphInstance to PyTorch Geometric Data format"""
+    if isinstance(graph_instance, GraphInstance):
+        node_features = graph_instance.nodes
+        edge_index = graph_instance.edge_links.permute(1, 0).long()  # Convert to edge index format
+        return Data(x=node_features, edge_index=edge_index)
+    else:
+        raise ValueError("Input must be a GraphInstance")
 
 
 class PlanetWarsAgentGNN(nn.Module):
@@ -20,9 +31,11 @@ class PlanetWarsAgentGNN(nn.Module):
         super().__init__()
         self.args = args
         self.player_id = player_id
+        self.edge_index = torch.Tensor([[i, j] for i in range(args.num_planets) for j in range(args.num_planets) if i != j]).long().permute(1, 0)
+
         
         # Node feature dimension from gym wrapper (13 features per planet)
-        self.node_feature_dim = 13
+        self.node_feature_dim = args.node_feature_dim
         
         # GNN layers
         self.conv1 = GCNConv(self.node_feature_dim, 64)
@@ -102,38 +115,22 @@ class PlanetWarsAgentGNN(nn.Module):
         
         return node_features, global_features
 
-    def process_observation(self, obs):
-        """Convert gym observation to PyTorch Geometric format"""
-        if isinstance(obs, dict):
-            # Single observation
-            node_features = torch.FloatTensor(obs['node_features'])
-            adj_matrix = torch.FloatTensor(obs['adjacency_matrix'])
-            
-            # Convert adjacency matrix to edge index
-            edge_index = torch.nonzero(adj_matrix).t().contiguous()
-            
-            return Data(x=node_features, edge_index=edge_index), None
-        else:
-            # Batch of observations
-            data_list = []
-            for i, single_obs in enumerate(obs):
-                node_features = torch.FloatTensor(single_obs['node_features'])
-                adj_matrix = torch.FloatTensor(single_obs['adjacency_matrix'])
-                edge_index = torch.nonzero(adj_matrix).t().contiguous()
-                data_list.append(Data(x=node_features, edge_index=edge_index))
-            
-            batch = Batch.from_data_list(data_list)
-            return batch, batch.batch
 
     def get_value(self, obs):
         """Get state value"""
-        data, batch = self.process_observation(obs)
+        if isinstance(obs, Union[Tuple, List]):
+            obs = Batch.from_data_list(obs)
+        data, batch = obs, obs.batch
+
+
         _, global_features = self.forward_gnn(data.x, data.edge_index, batch)
         return self.critic(global_features)
 
     def get_action_and_value(self, obs, action=None):
         """Get action probabilities and value"""
-        data, batch = self.process_observation(obs)
+        if isinstance(obs, Union[Tuple, List]):
+            obs = Batch.from_data_list(obs)
+        data, batch = obs, obs.batch
         node_features, global_features = self.forward_gnn(data.x, data.edge_index, batch)
         
         # Get per-node logits for source and target selection
@@ -292,7 +289,7 @@ if __name__ == "__main__":
     
     # Test with environment
     obs, info = env.reset()
-    print(f"Observation shape: {obs.node_features.shape}")
+    print(f"Observation shape: {obs.nodes.shape}")
     print(f"Adjacency matrix shape: {obs.adjacency_matrix.shape}")
     
     # Convert to dict format expected by agent

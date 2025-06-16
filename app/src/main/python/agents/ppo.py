@@ -3,8 +3,12 @@ import random
 import time
 from dataclasses import dataclass
 import sys
+from itertools import chain
 
 import gymnasium as gym
+from gymnasium.spaces import GraphInstance
+from torch_geometric.data import Data as PyGData
+from torch_geometric.data import Batch as PyGBatch
 import numpy as np
 import torch
 import torch.nn as nn
@@ -18,6 +22,8 @@ from torch.utils.tensorboard import SummaryWriter
 from util.gym_wrapper import PlanetWarsForwardModelEnv
 from core.game_state import Player
 from agents.mlp import PlanetWarsAgentMLP
+from agents.gnn import PlanetWarsAgentGNN, GraphInstanceToPyG
+
 
 
 @dataclass
@@ -30,7 +36,7 @@ class Args:
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
     cuda: bool = True
     """if toggled, cuda will be enabled by default"""
-    track: bool = True
+    track: bool = False
     """if toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "planet-wars-ppo"
     """the wandb's project name"""
@@ -78,12 +84,14 @@ class Args:
     # Planet Wars specific
     num_planets: int = 20
     """number of planets in the game"""
-    node_feature_dim: int = 13
+    node_feature_dim: int = 14
     """dimension of node features (owner, ship_count, growth_rate, x, y)"""
     max_ticks: int = 2000
     """maximum game ticks"""
     use_adjacency_matrix: bool = False
     """whether to include adjacency matrix in observations"""
+    flatten_observation: bool = False
+    """whether to flatten the observation space to a 1D array"""
     
     # Opponent configuration
     opponent_type: str = "random"  # "random", "greedy", or "do_nothing"
@@ -98,7 +106,7 @@ class Args:
     """the number of iterations (computed in runtime)"""
 
 
-def make_env(env_id, idx, capture_video, run_name, args):
+def make_env(env_id, idx, capture_video, run_name, device, args):
     def thunk():
         if env_id == "PlanetWarsForwardModel":
             # Configure opponent policy
@@ -135,7 +143,7 @@ def make_env(env_id, idx, capture_video, run_name, args):
                 env = gym.make(env_id)
         
         
-        env = PlanetWarsActionWrapper(env, args.num_planets, args.use_adjacency_matrix)
+        env = PlanetWarsActionWrapper(env, args.num_planets, args.use_adjacency_matrix, args.flatten_observation, device)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         return env
 
@@ -145,30 +153,36 @@ def make_env(env_id, idx, capture_video, run_name, args):
 class PlanetWarsActionWrapper(gym.Wrapper):
     """Wrapper to flatten the tuple action space for Planet Wars"""
     
-    def __init__(self, env, num_planets, use_adjacency_matrix=False):
+    def __init__(self, env, num_planets, use_adjacency_matrix=False, flatten_observation=False, device='cpu'):
         super().__init__(env)
         self.num_planets = num_planets
         self.use_adjacency_matrix = use_adjacency_matrix
-        
-        # Flatten action space: source_planet (discrete) + target_planet (discrete) + ship_ratio (continuous)
+        self.flatten_observation = flatten_observation
+        self.device = device
+
+        # Action space: source_planet (discrete) + target_planet (discrete) + ship_ratio (continuous)
         self.action_space = gym.spaces.Box(
-            low=np.array([0, 0, 0.0]),
-            high=np.array([num_planets-1, num_planets-1, 1.0]),
-            dtype=np.float32
-        )
+                low=np.array([0, 0, 0.0]),
+                high=np.array([num_planets-1, num_planets-1, 1.0]),
+                dtype=np.float32
+            )
+        if flatten_observation:
+            # Calculate observation space size based on whether adjacency matrix is included
+            obs_size = num_planets * 14  # node_features
+            if use_adjacency_matrix:
+                obs_size += num_planets * num_planets  # adjacency_matrix
         
-        # Calculate observation space size based on whether adjacency matrix is included
-        obs_size = num_planets * 13  # node_features
-        if use_adjacency_matrix:
-            obs_size += num_planets * num_planets  # adjacency_matrix
-        
-        # Flatten observation space from Dict to Box
-        self.observation_space = gym.spaces.Box(
-            low=-np.inf,
-            high=np.inf,
-            shape=(obs_size,),
-            dtype=np.float32
-        )
+            # Flatten observation space from Dict to Box
+            self.observation_space = gym.spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(obs_size,),
+                dtype=np.float32
+            )
+        else:
+            # Original action space: tuple of (source_planet, target_planet, ship_ratio)
+            self.observation_space = gym.spaces.Graph(node_space=gym.spaces.Box(low=0, high=1000, shape=(14,), dtype=np.float32),
+                                                  edge_space=gym.spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32))
     
     def step(self, action):
         # Convert flattened action back to tuple format
@@ -180,37 +194,28 @@ class PlanetWarsActionWrapper(gym.Wrapper):
         obs, reward, done, truncated, info = self.env.step(tuple_action)
         
         # Flatten observation
-        flat_obs = self._flatten_observation(obs)
-        return flat_obs, reward, done, truncated, info
+        if self.flatten_observation:
+            obs = self._flatten_observation(obs)
+        return obs, reward, done, truncated, info
 
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
-        return self._flatten_observation(obs), info
+        if self.flatten_observation:
+            obs = self._flatten_observation(obs)
+        return obs, info
     
     def _flatten_observation(self, obs):
         """Flatten the graph observation to a 1D array"""
-        if hasattr(obs, 'node_features') and hasattr(obs, 'adjacency_matrix'):
+        if hasattr(obs, 'x') and hasattr(obs, 'edge_attr'):
             # GraphObservation object
-            node_features_flat = obs.node_features.flatten()
+            node_features_flat = obs.x.flatten()
             
             if self.use_adjacency_matrix:
                 adj_matrix_flat = obs.adjacency_matrix.flatten()
                 return np.concatenate([node_features_flat, adj_matrix_flat]).astype(np.float32)
             else:
-                return node_features_flat.astype(np.float32)
+                return node_features_flat
                 
-        elif isinstance(obs, dict):
-            # Dict observation
-            node_features_flat = obs['node_features'].flatten()
-            
-            if self.use_adjacency_matrix:
-                adj_matrix_flat = obs['adjacency_matrix'].flatten()
-                return np.concatenate([node_features_flat, adj_matrix_flat]).astype(np.float32)
-            else:
-                return node_features_flat.astype(np.float32)
-        else:
-            # Assume already flattened
-            return np.array(obs).astype(np.float32)
 
     
 
@@ -251,14 +256,21 @@ if __name__ == "__main__":
 
     # Environment setup
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, i, args.capture_video, run_name, args) for i in range(args.num_envs)],
+        [make_env(args.env_id, i, args.capture_video, run_name, device, args) for i in range(args.num_envs)],
     )
 
-    agent = PlanetWarsAgentMLP(args).to(device)
+    agent = PlanetWarsAgentGNN(args).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # Storage setup
-    obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
+    if args.flatten_observation:
+        obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
+    else:
+        obs = [[PyGData(x=torch.zeros((args.num_planets, args.node_feature_dim), dtype=torch.float32).to(device),
+                             edge_index=torch.zeros((2, args.num_planets * (args.num_planets-1)), dtype=torch.int64).to(device)
+                             ) 
+                             for _ in range(args.num_envs)] for _ in range(args.num_steps)]
+
     actions = torch.zeros((args.num_steps, args.num_envs, 3)).to(device)  # 3D action space
     logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
@@ -269,7 +281,10 @@ if __name__ == "__main__":
     global_step = 0
     start_time = time.time()
     next_obs, _ = envs.reset(seed=args.seed)
-    next_obs = torch.Tensor(next_obs).to(device)
+    if args.flatten_observation:
+        next_obs = torch.Tensor(next_obs).to(device)
+    else:
+        next_obs = [(o).to(device) for o in next_obs]
     next_done = torch.zeros(args.num_envs).to(device)
     curriculum_step = 0
     lesson_number = 0
@@ -295,6 +310,7 @@ if __name__ == "__main__":
             global_step += args.num_envs
             curriculum_step += args.num_envs
             obs[step] = next_obs
+
             dones[step] = next_done
 
             # Action logic
@@ -309,7 +325,12 @@ if __name__ == "__main__":
 
             next_done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
-            next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
+            if args.flatten_observation:
+                next_obs = torch.Tensor(next_obs).to(device)
+            else:
+                next_obs = [o.to(device) for o in next_obs]  # Convert each observation to device
+            next_done = torch.Tensor(next_done).to(device)
+
 
             # Log episode statistics
             if next_done.any():
@@ -337,7 +358,7 @@ if __name__ == "__main__":
                             print(f"Curriculum step {curriculum_step} completed, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
                             envs.close()
                             envs = gym.vector.SyncVectorEnv(
-                                [make_env(args.env_id, i, args.capture_video, run_name, args) for i in range(args.num_envs)],
+                                [make_env(args.env_id, i, args.capture_video, run_name, device, args) for i in range(args.num_envs)],
                             )
 
 
@@ -358,7 +379,10 @@ if __name__ == "__main__":
             returns = advantages + values
 
         # Flatten the batch
-        b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
+        if args.flatten_observation:
+            b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
+        else:
+            b_obs = PyGBatch.from_data_list(list(chain.from_iterable(obs))).to(device)
         b_logprobs = logprobs.reshape(-1)
         b_actions = actions.reshape((-1, 3))
         b_advantages = advantages.reshape(-1)
@@ -373,8 +397,10 @@ if __name__ == "__main__":
             for start in range(0, args.batch_size, args.minibatch_size):
                 end = start + args.minibatch_size
                 mb_inds = b_inds[start:end]
-
-                _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
+                if args.flatten_observation:
+                    _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
+                else:
+                    _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs.index_select(mb_inds), b_actions[mb_inds])
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
 
