@@ -5,6 +5,7 @@ from typing import Dict, Any, Tuple, List, Optional
 from dataclasses import dataclass
 import time
 import torch
+from agents.baseline_policies import RandomPolicy, GreedyPolicy
 
 from util.KotlinForwardModelBridge import KotlinForwardModelBridge
 from torch_geometric.data import Data
@@ -38,11 +39,10 @@ class PlanetWarsForwardModelEnv(gym.Env):
         self.controlled_player = controlled_player
         self.opponent_player = opponent_player
         self.max_ticks = max_ticks
-        self.opponent_policy = opponent_policy or self._random_opponent_policy
+        self.opponent_policy = opponent_policy or RandomPolicy(game_params, opponent_player)
         self.previous_score = 0.0
         self.edge_index = torch.Tensor([[i, j] for i in range(game_params['numPlanets']) for j in range(game_params['numPlanets']) if i != j]).long().permute(1, 0)
 
-        # Game parameters #TODO: Params is not exposed to the Kotlin side, so we need to set them here
         self.game_params = game_params or {
             'maxTicks': max_ticks,
             'numPlanets': 10,
@@ -114,7 +114,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
         
         # Get opponent action
         current_state = self.kotlin_bridge.get_game_state()
-        opponent_action = self.opponent_policy(current_state, self.opponent_player)
+        opponent_action = self.opponent_policy(current_state)
         
         # Create actions dict
         actions = {}
@@ -189,95 +189,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
             num_ships=num_ships
         )
     
-    def _random_opponent_policy(self, game_state: Dict[str, Any], player: Player) -> Action:
-        """Default random opponent policy"""
-        planets = game_state['planets']
-        player_int = 1 if player == Player.Player1 else 2
-        
-        # Find planets owned by the opponent that can send ships
-        owned_planets = [
-            p for p in planets 
-            if (p['owner'] == player_int and 
-                p['numShips'] > 0 and 
-                p.get('transporter') is None)
-        ]
-        
-        if not owned_planets:
-            return Action.do_nothing()
-        
-        # Random source planet
-        source = np.random.choice(owned_planets)
-        
-        # Find target planets (not owned by this player)
-        target_candidates = [p for p in planets if p['owner'] != player_int]
-        
-        if not target_candidates:
-            return Action.do_nothing()
-        
-        # Random target
-        target = np.random.choice(target_candidates)
-        
-        # Send random portion of ships (10-80%)
-        ship_ratio = np.random.uniform(0.1, 0.8)
-        num_ships = source['numShips'] * ship_ratio
-        
-        return Action(
-            player_id=player,
-            source_planet_id=source['id'],
-            destination_planet_id=target['id'],
-            num_ships=num_ships
-        )
-    
-    def _greedy_opponent_policy(self, game_state: Dict[str, Any], player: Player) -> Action:
-        """Greedy opponent policy - attacks weakest nearby targets"""
-        planets = game_state['planets']
-        player_int = 1 if player == Player.Player1 else 2
-        
-        # Find planets owned by the opponent that can send ships
-        owned_planets = [
-            p for p in planets 
-            if (p['owner'] == player_int and 
-                p['numShips'] > 10 and 
-                p.get('transporter') is None)
-        ]
-        
-        if not owned_planets:
-            return Action.do_nothing()
-        
-        # Choose source planet with most ships
-        source = max(owned_planets, key=lambda p: p['numShips'])
-        
-        # Find target planets (not owned by this player)
-        target_candidates = [p for p in planets if p['owner'] != player_int]
-        
-        if not target_candidates:
-            return Action.do_nothing()
-        
-        # Choose closest weak target
-        def target_score(target):
-            distance = np.sqrt((source['x'] - target['x'])**2 + (source['y'] - target['y'])**2)
-            strength = target['numShips'] if target['owner'] == 0 else target['numShips'] * 1.5
-            return distance + strength * 0.1
-        
-        target = min(target_candidates, key=target_score)
-        
-        # Send appropriate number of ships
-        distance = np.sqrt((source['x'] - target['x'])**2 + (source['y'] - target['y'])**2)
-        eta = distance / self.game_params.get('transporterSpeed', 3.0)
-        estimated_defense = target['numShips'] + target['growthRate'] * eta
-        
-        num_ships = max(estimated_defense * 1.2, source['numShips'] * 0.5)
-        num_ships = min(num_ships, source['numShips'] * 0.8)
-        
-        if num_ships < 1:
-            return Action.do_nothing()
-        
-        return Action(
-            player_id=player,
-            source_planet_id=source['id'],
-            destination_planet_id=target['id'],
-            num_ships=num_ships
-        )
+
     
     def _get_observation(self) -> Data:
         """Create graph observation from current game state"""
@@ -341,8 +253,8 @@ class PlanetWarsForwardModelEnv(gym.Env):
             planet['owner'],  # Owner ID
             planet['numShips'],  # Number of ships
             planet['growthRate'],  # Growth rate
-            planet['x'],  # X coordinate
-            planet['y']   # Y coordinate
+            planet['x'] / self.game_params['width'],  # X coordinate
+            planet['y'] / self.game_params['height']  # Y coordinate
         ]
         
         # Add transporter info if available
@@ -356,42 +268,14 @@ class PlanetWarsForwardModelEnv(gym.Env):
                 # 1.- Swap planet labels (if using onehot, obs vector is different size depending on num planets)
                 # 2.- Use edge features for transporters
                 transporter['numShips'],
-                transporter['x'],
-                transporter['y'],
-                transporter['vx'],
-                transporter['vy']
+                # Normalized transporter position
+                transporter['x']*transporter['vx']/(self.game_params['width'] * self.game_params['transporterSpeed']),
+                transporter['y']*transporter['vy']/(self.game_params['height'] * self.game_params['transporterSpeed']),
+                # transporter['vx'],
+                # transporter['vy']
             ])
         else:
-            features.extend([0, 0, 0, 0, 0, 0, 0])
-        return np.array(features, dtype=np.float32)
-
-    def _extract_node_features(self, graph: nx.Graph) -> np.ndarray:
-        """Extract node features from graph"""
-        features = []
-        for node in graph.nodes():
-            data = graph.nodes[node]
-            planet_features = [
-                data['owner'],
-                data['ship_count'],
-                data['growth_rate'],
-                data['x'],
-                data['y']
-            ]
-            if data['transporter']:
-                transporter = data['transporter']
-                planet_features.extend([
-                    transporter['owner'],
-                    transporter['sourceIndex'],
-                    transporter['destinationIndex'],
-                    transporter['numShips'],
-                    transporter['x'],
-                    transporter['y'],
-                    transporter['vx'],
-                    transporter['vy']
-                ])
-            else:
-                planet_features.extend([0, 0, 0, 0, 0, 0, 0, 0])
-            features.append(planet_features)
+            features.extend([0, 0, 0, 0, 0])
         return np.array(features, dtype=np.float32)
     
     def _calculate_normalized_score_delta(self, game_state: Dict[str, Any]) -> float:
@@ -486,25 +370,100 @@ class PlanetWarsForwardModelEnv(gym.Env):
         """Set a custom opponent policy function"""
         self.opponent_policy = policy_func
 
+class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
+    """Forward model environment for Planet Wars with graph-based state representation"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.edge_attr = torch.Tensor(np.stack(
+            [self._get_default_edge_features(edge[0], edge[1]) for edge in self.edge_index.permute(1, 0).numpy()]
+        ))
+
+
+
+    def _get_observation(self) -> Data:
+        game_state = self.kotlin_bridge.get_game_state()
+        planets = game_state['planets']
+        node_features = torch.Tensor(np.stack([self._get_planet_features(p) for p in planets], axis=0))
+        # One-hot encode owners
+        owners = self._owner_one_hot_encoding(node_features[:, 0].long())
+        node_features = torch.cat((owners, node_features[:, 1:]), dim=1)
+        edge_features = self.edge_attr.detach().clone()
+        planets_with_transporters = [p for p in planets if p.get('transporter') is not None]
+        for p in planets_with_transporters:
+            edge_features[self._get_edge_index(p['id'], p['transporter']['destinationIndex'])] = self._get_transporter_features(p)
+        #One-hot encode transporter owner
+        transporter_owners = self._owner_one_hot_encoding(edge_features[:, 0].long())
+        edge_features = torch.cat((transporter_owners, edge_features[:, 1:]), dim=1)
+        return Data(
+            x=node_features,
+            edge_index=self.edge_index,
+            edge_attr=edge_features[:,0]
+        )
+
+
+
+
+    def _get_planet_features(self, planet: Dict[str, Any]) -> np.ndarray:
+        """Extract features from a single planet for GNN"""
+        features = np.asarray([
+            planet['owner'],  # Owner ID
+            planet['numShips'],  # Number of ships
+            planet['growthRate'],  # Growth rate
+        ])
+        return features
+    def _get_transporter_features(self, planet) -> torch.Tensor:
+        """Calculate edge features between two planets. Weight is normalized by game width/height and transporter speed."""
+        if planet['transporter'] is not None:
+            target_planet = self._get_planet_by_id(planet['transporter']['destinationIndex'])
+            distance = np.sqrt(((target_planet['x'] - planet['transporter']['x'])/self.game_params['width'])**2 + ((target_planet['y'] - planet['transporter']['y'])/self.game_params['height'])**2)
+            weight = self.game_params['transporterSpeed'] / (distance ** self.distance_power + 1e-8)
+            return torch.FloatTensor([planet['transporter']['owner'], planet['transporter']['numShips'], weight])
+        else:
+            raise ValueError("Planet does not have a transporter")
+    def _get_default_edge_features(self,i,j) -> np.ndarray:
+        """Get default edge features for planets without transporters in use"""
+        weight = self.game_params['transporterSpeed'] / (np.sqrt((self._get_planet_by_id(i)['x']/self.game_params['width'] - self._get_planet_by_id(j)['x']/self.game_params['width']) ** 2 + (self._get_planet_by_id(i)['y']/self.game_params['height'] - self._get_planet_by_id(j)['y']/self.game_params['height']) ** 2) ** self.distance_power + 1e-8)
+        return np.array([0.0,0.0, weight], dtype=np.float32)
+    def _get_planet_by_id(self, planet_id: int) -> Dict[str, Any]:
+        """Get planet data by ID"""
+        game_state = self.kotlin_bridge.get_game_state()
+        for planet in game_state['planets']:
+            if planet['id'] == planet_id:
+                return planet
+        return None
+    def _get_edge_index(self,i,j) -> int:
+        """Get edge index for graph representation. Considers no self-loops are present."""
+        if j>i:
+            return i * (self.game_params['numPlanets']-1) + j-1
+        elif j<i:
+            return i * (self.game_params['numPlanets']-1) + j
+        else:
+            raise ValueError("No self-loops allowed")
 
 # Example usage
 if __name__ == "__main__":
     print("=== Forward Model Gym Environment ===")
     
     # Create environment with greedy opponent
-    env = PlanetWarsForwardModelEnv(
+    env = PlanetWarsForwardModelGNNEnv(
         controlled_player=Player.Player1,
         opponent_player=Player.Player2,
         max_ticks=200,
         game_params={
-            'numPlanets': 15,
+            'numPlanets': 14,
             'maxTicks': 200,
-            'transporterSpeed': 2.0
+            'transporterSpeed': 2.0,
+            'width': 800,
+            'height': 600,
         }
     )
     
     # Set greedy opponent
-    env.set_opponent_policy(env._greedy_opponent_policy)
+    env.set_opponent_policy(GreedyPolicy(
+        game_params=env.game_params,
+        player=env.opponent_player
+    ))
     
     obs, info = env.reset()
     print(f"Graph has {len(obs.x)} nodes and {len(obs.edge_index)} edges")
@@ -541,3 +500,4 @@ if __name__ == "__main__":
     
     env.close()
     print("Done!")
+

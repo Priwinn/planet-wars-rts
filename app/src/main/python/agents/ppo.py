@@ -19,10 +19,11 @@ from torch.distributions.categorical import Categorical
 from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
-from util.gym_wrapper import PlanetWarsForwardModelEnv
+from util.gym_wrapper import PlanetWarsForwardModelEnv, PlanetWarsForwardModelGNNEnv
 from core.game_state import Player
 from agents.mlp import PlanetWarsAgentMLP
 from agents.gnn import PlanetWarsAgentGNN, GraphInstanceToPyG
+from agents.baseline_policies import GreedyPolicy,RandomPolicy
 
 
 
@@ -46,7 +47,7 @@ class Args:
     """whether to capture videos of the agent performances (check out `videos` folder)"""
 
     # Algorithm specific arguments
-    env_id: str = "PlanetWarsForwardModel"
+    env_id: str = "PlanetWarsForwardModelGNN"
     """the id of the environment"""
     total_timesteps: int = 5000000
     """total timesteps of the experiments"""
@@ -84,7 +85,7 @@ class Args:
     # Planet Wars specific
     num_planets: int = 20
     """number of planets in the game"""
-    node_feature_dim: int = 14
+    node_feature_dim: int = 5 #5 for gnn, 14 for mlp
     """dimension of node features (owner, ship_count, growth_rate, x, y)"""
     max_ticks: int = 2000
     """maximum game ticks"""
@@ -107,16 +108,14 @@ class Args:
 
 
 def make_env(env_id, idx, capture_video, run_name, device, args):
-    def thunk():
+    def thunk():        
+        # Configure opponent policy
+        if args.opponent_type == "random":
+            opponent_policy = None  # Will use default random policy
+        elif args.opponent_type == "greedy":
+            opponent_policy = "greedy"  # Will be set after env creation
+
         if env_id == "PlanetWarsForwardModel":
-            # Configure opponent policy
-            if args.opponent_type == "random":
-                opponent_policy = None  # Will use default random policy
-            elif args.opponent_type == "greedy":
-                opponent_policy = "greedy"  # Will be set after env creation
-            else:  # do_nothing
-                opponent_policy = lambda state, player: Action.do_nothing()
-            
             env = PlanetWarsForwardModelEnv(
                 controlled_player=Player.Player1,
                 opponent_player=Player.Player2,
@@ -130,17 +129,22 @@ def make_env(env_id, idx, capture_video, run_name, device, args):
                 },
                 opponent_policy=opponent_policy
             )
-            
-            # Set greedy opponent if specified
-            if args.opponent_type == "greedy":
-                env.set_opponent_policy(env._greedy_opponent_policy)
-                
-        else:
-            if capture_video and idx == 0:
-                env = gym.make(env_id, render_mode="rgb_array")
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-            else:
-                env = gym.make(env_id)
+        elif env_id == "PlanetWarsForwardModelGNN":
+            env = PlanetWarsForwardModelGNNEnv(
+                controlled_player=Player.Player1,
+                opponent_player=Player.Player2,
+                max_ticks=args.max_ticks,
+                game_params={
+                    'numPlanets': args.num_planets,
+                    'maxTicks': args.max_ticks,
+                    'transporterSpeed': 3.0,
+                    'width': 640,
+                    'height': 480
+                },
+                opponent_policy=opponent_policy
+            )
+        if opponent_policy == "greedy":
+            env.set_opponent_policy(GreedyPolicy(game_params=env.game_params, player=Player.Player2))
         
         
         env = PlanetWarsActionWrapper(env, args.num_planets, args.use_adjacency_matrix, args.flatten_observation, device)

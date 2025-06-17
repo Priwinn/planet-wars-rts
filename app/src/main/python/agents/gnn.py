@@ -34,18 +34,18 @@ class PlanetWarsAgentGNN(nn.Module):
         self.edge_index = torch.Tensor([[i, j] for i in range(args.num_planets) for j in range(args.num_planets) if i != j]).long().permute(1, 0)
 
         
-        # Node feature dimension from gym wrapper (13 features per planet)
+        # Node feature dimension from gym wrapper
         self.node_feature_dim = args.node_feature_dim
         
-        # GNN layers
-        self.conv1 = GCNConv(self.node_feature_dim, 64)
-        self.conv2 = GCNConv(64, 128)
-        self.conv3 = GCNConv(128, 64)
+        # GNN layers (edge weights)
+        # self.conv1 = GCNConv(self.node_feature_dim, 64)
+        # self.conv2 = GCNConv(64, 128)
+        # self.conv3 = GCNConv(128, 64)
         
-        # Alternative: Graph Attention Network layers
-        # self.conv1 = GATConv(self.node_feature_dim, 64, heads=4, concat=True)
-        # self.conv2 = GATConv(64*4, 128, heads=4, concat=True)
-        # self.conv3 = GATConv(128*4, 64, heads=1, concat=False)
+        # Graph Attention Network layers (edge features)
+        self.conv1 = GATConv(self.node_feature_dim, 64, heads=4, concat=True)
+        self.conv2 = GATConv(64*4, 128, heads=4, concat=True)
+        self.conv3 = GATConv(128*4, 64, heads=1, concat=False)
         
         # Global graph feature extraction
         self.global_pool = global_mean_pool
@@ -93,13 +93,13 @@ class PlanetWarsAgentGNN(nn.Module):
         )
         self.ratio_actor_logstd = nn.Parameter(torch.zeros(1))
 
-    def forward_gnn(self, x, edge_index, batch=None):
+    def forward_gnn(self, x, edge_index, edge_attr, batch=None):
         """Forward pass through GNN layers"""
         # GNN forward pass
-        h = F.relu(self.conv1(x, edge_index))
-        h = F.relu(self.conv2(h, edge_index))
-        h = self.conv3(h, edge_index)
-        
+        h = F.relu(self.conv1(x, edge_index, edge_attr))
+        h = F.relu(self.conv2(h, edge_index, edge_attr))
+        h = self.conv3(h, edge_index, edge_attr)
+
         # Per-node features
         node_features = self.node_mlp(h)
         
@@ -123,7 +123,7 @@ class PlanetWarsAgentGNN(nn.Module):
         data, batch = obs, obs.batch
 
 
-        _, global_features = self.forward_gnn(data.x, data.edge_index, batch)
+        _, global_features = self.forward_gnn(data.x, data.edge_index, data.edge_attr, batch)
         return self.critic(global_features)
 
     def get_action_and_value(self, obs, action=None):
@@ -131,8 +131,8 @@ class PlanetWarsAgentGNN(nn.Module):
         if isinstance(obs, Union[Tuple, List]):
             obs = Batch.from_data_list(obs)
         data, batch = obs, obs.batch
-        node_features, global_features = self.forward_gnn(data.x, data.edge_index, batch)
-        
+        node_features, global_features = self.forward_gnn(data.x, data.edge_index, data.edge_attr, batch)
+
         # Get per-node logits for source and target selection
         source_node_logits = self.source_actor(node_features).squeeze(-1)  # [num_nodes]
         target_node_logits = self.target_actor(node_features).squeeze(-1)  # [num_nodes]
