@@ -47,7 +47,7 @@ class Args:
     """whether to capture videos of the agent performances (check out `videos` folder)"""
 
     # Algorithm specific arguments
-    env_id: str = "PlanetWarsForwardModelGNN"
+    env_id: str = "PlanetWarsForwardModel"
     """the id of the environment"""
     total_timesteps: int = 5000000
     """total timesteps of the experiments"""
@@ -83,15 +83,16 @@ class Args:
     """the target KL divergence threshold"""
 
     # Planet Wars specific
-    num_planets: int = 20
+    agent_type: str = "gnn"  # "mlp" or "gnn"
+    num_planets: int = 6
     """number of planets in the game"""
-    node_feature_dim: int = 5 #5 for gnn, 14 for mlp
+    node_feature_dim: int = 14 #5 for gnn, 14 for mlp
     """dimension of node features (owner, ship_count, growth_rate, x, y)"""
     max_ticks: int = 2000
     """maximum game ticks"""
     use_adjacency_matrix: bool = False
     """whether to include adjacency matrix in observations"""
-    flatten_observation: bool = False
+    flatten_observation: bool = True
     """whether to flatten the observation space to a 1D array"""
     
     # Opponent configuration
@@ -230,6 +231,9 @@ if __name__ == "__main__":
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
+    args.flatten_observation = args.agent_type != "gnn"
+    args.env_id = "PlanetWarsForwardModelGNN" if args.agent_type == "gnn" else "PlanetWarsForwardModel"
+    args.node_feature_dim = 5 if args.agent_type == "gnn" else 14
     run_name = f"{args.env_id}__{args.exp_name}__{args.opponent_type}__adj_{args.use_adjacency_matrix}__{args.seed}__{int(time.time())}"
     
     if args.track:
@@ -263,7 +267,10 @@ if __name__ == "__main__":
         [make_env(args.env_id, i, args.capture_video, run_name, device, args) for i in range(args.num_envs)],
     )
 
-    agent = PlanetWarsAgentGNN(args).to(device)
+    if args.agent_type == "gnn":
+        agent = PlanetWarsAgentGNN(args).to(device)
+    else:
+        agent = PlanetWarsAgentMLP(args).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # Storage setup

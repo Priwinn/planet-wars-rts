@@ -77,7 +77,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
     def _create_observation_space(self) -> gym.Space:
         """Create observation space for graph features"""
         # Node features: [owner, ship_count, growth_rate, x, y, transporter_info...]
-        node_feature_dim = 13
+        node_feature_dim = 16
         
         return gym.spaces.Dict({
             'node_features': gym.spaces.Box(
@@ -200,7 +200,8 @@ class PlanetWarsForwardModelEnv(gym.Env):
         
         # Onehot owners
         owners = self._owner_one_hot_encoding(node_features[:, 0].long())
-        node_features = torch.cat((owners, node_features[:, 1:]), dim=1)
+        transporter_owners = self._owner_one_hot_encoding(node_features[:, 5].long())
+        node_features = torch.cat((owners, node_features[:, 1:5], transporter_owners, node_features[:, 6:]), dim=1)
 
         # Add edges with distance-based weights
         # for i in range(len(planets)):
