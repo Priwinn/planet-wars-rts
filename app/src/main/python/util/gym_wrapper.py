@@ -11,7 +11,15 @@ from util.KotlinForwardModelBridge import KotlinForwardModelBridge
 from torch_geometric.data import Data
 from core.game_state import Player, Action
 
-
+def owner_one_hot_encoding(owner: torch.Tensor, player_id: int) -> torch.Tensor:
+    """Convert owner integer to one-hot encoding. Assume Neutral=0, Controlled=1, Opponent=2 (swaps controlled and opponent if needed)"""
+    one_hot = torch.nn.functional.one_hot(
+        owner.long(), num_classes=3
+    )
+    # Swap controlled and opponent if needed
+    if player_id == 2:
+        one_hot = one_hot[[0, 2, 1], :]
+    return one_hot
 
 class PlanetWarsForwardModelEnv(gym.Env):
     """
@@ -199,9 +207,9 @@ class PlanetWarsForwardModelEnv(gym.Env):
         
         
         # Onehot owners
-        owners = self._owner_one_hot_encoding(node_features[:, 0].long())
-        transporter_owners = self._owner_one_hot_encoding(node_features[:, 5].long())
-        node_features = torch.cat((owners, node_features[:, 1:5], transporter_owners, node_features[:, 6:]), dim=1)
+        # owners = self._owner_one_hot_encoding(node_features[:, 0].long())
+        # transporter_owners = self._owner_one_hot_encoding(node_features[:, 5].long())
+        # node_features = torch.cat((owners, node_features[:, 1:5], transporter_owners, node_features[:, 6:]), dim=1)
 
         # Add edges with distance-based weights
         # for i in range(len(planets)):

@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.distributions import Normal, Categorical
 import numpy as np
+from util.gym_wrapper import owner_one_hot_encoding
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
@@ -19,7 +20,7 @@ class PlanetWarsAgentMLP(nn.Module):
         self.player_id = player_id
 
         # Input dimensions based on whether adjacency matrix is used
-        node_features_dim = args.num_planets * args.node_feature_dim
+        node_features_dim = args.num_planets * (args.node_feature_dim + 4) # 4 extra from one-hot encoding of transporter owners and planet owners
         total_input_dim = node_features_dim
         
         if args.use_adjacency_matrix:
@@ -68,12 +69,31 @@ class PlanetWarsAgentMLP(nn.Module):
         self.ratio_actor_logstd = nn.Parameter(torch.zeros(1))  # Log std for ratio action
 
     def get_value(self, x):
-        features = self.feature_extractor(x)
+        planet_owners = x[:, :, 0]
+        transporter_owners = x[:, :, 5]
+        x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id), 
+                       x[:, :, 1:5],
+                       owner_one_hot_encoding(transporter_owners, self.player_id), 
+                       x[:, :, 6:]
+                       ), dim=-1)
+        features = self.feature_extractor(x.flatten(start_dim=1))
         return self.critic(features)
 
 
     def get_action_and_value(self, x, action=None):
-        features = self.feature_extractor(x)
+        planet_owners = x[:, :, 0]
+        transporter_owners = x[:, :, 5]
+        source_mask = planet_owners == 1
+        target_mask = planet_owners == 2 #TODO check if sending transporters to owned planets is allowed (pretty sure yes)
+
+        x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id), 
+                       x[:, :, 1:5],
+                       owner_one_hot_encoding(transporter_owners, self.player_id), 
+                       x[:, :, 6:]
+                       ), dim=-1)
+
+        
+        features = self.feature_extractor(x.flatten(start_dim=1))
         
         # Get action distributions
         source_logits = self.source_actor(features)
@@ -81,9 +101,6 @@ class PlanetWarsAgentMLP(nn.Module):
         ratio_mean = torch.sigmoid(self.ratio_actor_mean(features))  # Ensure 0-1 range
         
 
-        #Get source mask, target mask depends on source mask
-        planet_owners = x[:, ::self.args.node_feature_dim]  # owner info is on dimensions positions pos s.t. pos % num_features_dim==0
-        source_mask = planet_owners == 1  # Mask for source actions (only own planets)
 
         # Create masked distributions
         # TODO: disallow sending transporters to themselves

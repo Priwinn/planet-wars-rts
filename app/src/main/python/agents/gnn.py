@@ -148,7 +148,7 @@ class PlanetWarsAgentGNN(nn.Module):
             batch_size = 1
             num_planets = data.x.size(0)
             
-            # Reshape logits for masking
+            # Reshape logits for masking #TODO:Fix this for onehot
             source_logits = source_node_logits.unsqueeze(0)  # [1, num_planets]
             target_logits = target_node_logits.unsqueeze(0)  # [1, num_planets]
             

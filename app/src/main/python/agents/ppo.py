@@ -48,7 +48,7 @@ class Args:
 
     # Algorithm specific arguments
     env_id: str = "PlanetWarsForwardModel"
-    """the id of the environment"""
+    """the id of the environment. Filled in runtime, either `PlanetWarsForwardModel` or `PlanetWarsForwardModelGNN` according to agent type"""
     total_timesteps: int = 5000000
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
@@ -83,17 +83,17 @@ class Args:
     """the target KL divergence threshold"""
 
     # Planet Wars specific
-    agent_type: str = "gnn"  # "mlp" or "gnn"
-    num_planets: int = 6
+    agent_type: str = "mlp"  # "mlp" or "gnn"
+    num_planets: int = 20
     """number of planets in the game"""
-    node_feature_dim: int = 14 #5 for gnn, 14 for mlp
+    node_feature_dim: int = 0 #Filled in runtime 5 for gnn, 14 for mlp
     """dimension of node features (owner, ship_count, growth_rate, x, y)"""
     max_ticks: int = 2000
     """maximum game ticks"""
     use_adjacency_matrix: bool = False
     """whether to include adjacency matrix in observations"""
     flatten_observation: bool = True
-    """whether to flatten the observation space to a 1D array"""
+    """Filled on run time, mlp uses flattened observation, gnn uses graph observation"""
     
     # Opponent configuration
     opponent_type: str = "random"  # "random", "greedy", or "do_nothing"
@@ -148,7 +148,7 @@ def make_env(env_id, idx, capture_video, run_name, device, args):
             env.set_opponent_policy(GreedyPolicy(game_params=env.game_params, player=Player.Player2))
         
         
-        env = PlanetWarsActionWrapper(env, args.num_planets, args.use_adjacency_matrix, args.flatten_observation, device)
+        env = PlanetWarsActionWrapper(env, args.num_planets, args.use_adjacency_matrix, args.flatten_observation, device, node_feature_dim=args.node_feature_dim)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         return env
 
@@ -157,13 +157,14 @@ def make_env(env_id, idx, capture_video, run_name, device, args):
 
 class PlanetWarsActionWrapper(gym.Wrapper):
     """Wrapper to flatten the tuple action space for Planet Wars"""
-    
-    def __init__(self, env, num_planets, use_adjacency_matrix=False, flatten_observation=False, device='cpu'):
+
+    def __init__(self, env, num_planets, use_adjacency_matrix=False, flatten_observation=False, device='cpu', node_feature_dim=0):
         super().__init__(env)
         self.num_planets = num_planets
         self.use_adjacency_matrix = use_adjacency_matrix
         self.flatten_observation = flatten_observation
         self.device = device
+        self.node_feature_dim = node_feature_dim
 
         # Action space: source_planet (discrete) + target_planet (discrete) + ship_ratio (continuous)
         self.action_space = gym.spaces.Box(
@@ -173,19 +174,18 @@ class PlanetWarsActionWrapper(gym.Wrapper):
             )
         if flatten_observation:
             # Calculate observation space size based on whether adjacency matrix is included
-            obs_size = num_planets * 14  # node_features
-            if use_adjacency_matrix:
-                obs_size += num_planets * num_planets  # adjacency_matrix
+            # obs_size = num_planets * self.node_feature_dim  # node_features
+            # if use_adjacency_matrix:
+            #     obs_size += num_planets * num_planets  # adjacency_matrix
         
             # Flatten observation space from Dict to Box
             self.observation_space = gym.spaces.Box(
                 low=-np.inf,
                 high=np.inf,
-                shape=(obs_size,),
+                shape=(num_planets,self.node_feature_dim),
                 dtype=np.float32
             )
         else:
-            # Original action space: tuple of (source_planet, target_planet, ship_ratio)
             self.observation_space = gym.spaces.Graph(node_space=gym.spaces.Box(low=0, high=1000, shape=(14,), dtype=np.float32),
                                                   edge_space=gym.spaces.Box(low=0, high=1, shape=(1,), dtype=np.float32))
     
@@ -200,26 +200,26 @@ class PlanetWarsActionWrapper(gym.Wrapper):
         
         # Flatten observation
         if self.flatten_observation:
-            obs = self._flatten_observation(obs)
+            obs = obs.x
         return obs, reward, done, truncated, info
 
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
         if self.flatten_observation:
-            obs = self._flatten_observation(obs)
+            obs = obs.x
         return obs, info
     
-    def _flatten_observation(self, obs):
-        """Flatten the graph observation to a 1D array"""
-        if hasattr(obs, 'x') and hasattr(obs, 'edge_attr'):
-            # GraphObservation object
-            node_features_flat = obs.x.flatten()
+    # def _flatten_observation(self, obs):
+    #     """Flatten the graph observation to a 1D array"""
+    #     if hasattr(obs, 'x') and hasattr(obs, 'edge_attr'):
+    #         # GraphObservation object
+    #         node_features_flat = obs.x.flatten()
             
-            if self.use_adjacency_matrix:
-                adj_matrix_flat = obs.adjacency_matrix.flatten()
-                return np.concatenate([node_features_flat, adj_matrix_flat]).astype(np.float32)
-            else:
-                return node_features_flat
+    #         if self.use_adjacency_matrix:
+    #             adj_matrix_flat = obs.adjacency_matrix.flatten()
+    #             return np.concatenate([node_features_flat, adj_matrix_flat]).astype(np.float32)
+    #         else:
+    #             return node_features_flat
                 
 
     
@@ -233,7 +233,7 @@ if __name__ == "__main__":
     args.num_iterations = args.total_timesteps // args.batch_size
     args.flatten_observation = args.agent_type != "gnn"
     args.env_id = "PlanetWarsForwardModelGNN" if args.agent_type == "gnn" else "PlanetWarsForwardModel"
-    args.node_feature_dim = 5 if args.agent_type == "gnn" else 14
+    args.node_feature_dim = 5 if args.agent_type == "gnn" else 10
     run_name = f"{args.env_id}__{args.exp_name}__{args.opponent_type}__adj_{args.use_adjacency_matrix}__{args.seed}__{int(time.time())}"
     
     if args.track:
