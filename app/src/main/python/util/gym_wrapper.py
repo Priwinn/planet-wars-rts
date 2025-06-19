@@ -152,7 +152,6 @@ class PlanetWarsForwardModelEnv(gym.Env):
         }
         if done: 
             print(f"Game over at tick {game_state['tick']}, leader: {game_state['leader']}")
-            # info['final_info'] = {'episode': {'r': reward, 'l': game_state['tick']}}
 
 
 
@@ -182,11 +181,11 @@ class PlanetWarsForwardModelEnv(gym.Env):
         # Calculate number of ships to send
         num_ships = source_planet_data['numShips'] * ship_ratio
         
-        # Must have at least 1 ship and leave at least 1 ship on planet
-        if num_ships < 1 or source_planet_data['numShips'] - num_ships < 1:
+        # Ships sent has to be positive and less than available ships
+        if num_ships <= 0 or num_ships > source_planet_data['numShips']:
             return Action.do_nothing()
         
-        # Validate target planet (can't attack self)
+        # Validate target planet (can't send to self)
         if target_planet == source_planet or target_planet >= len(planets):
             return Action.do_nothing()
         
@@ -299,8 +298,8 @@ class PlanetWarsForwardModelEnv(gym.Env):
             owner = planet['owner']
             
             # Base score: ships + growth potential
-            planet_value = 1*planet['numShips'] + planet['growthRate'] * 100
-            
+            planet_value = planet['numShips'] + planet['growthRate'] * (self.game_params['maxTicks']- game_state['tick'])
+
             if owner == self.player_int:
                 controlled_player_score += planet_value
             elif owner == self.opponent_int:
@@ -324,7 +323,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
         if total_score == 0:
             return 0.0
         
-        return (controlled_player_score - opponent_score) / total_score
+        return (controlled_player_score - opponent_score) / self.game_params['maxTicks']
     
     def _calculate_reward(self, game_state: Dict[str, Any]) -> float:
         """Calculate reward based on game state for the controlled player"""
@@ -395,15 +394,15 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
         planets = game_state['planets']
         node_features = torch.Tensor(np.stack([self._get_planet_features(p) for p in planets], axis=0))
         # One-hot encode owners
-        owners = self._owner_one_hot_encoding(node_features[:, 0].long())
-        node_features = torch.cat((owners, node_features[:, 1:]), dim=1)
+        # owners = self._owner_one_hot_encoding(node_features[:, 0].long())
+        # node_features = torch.cat((owners, node_features[:, 1:]), dim=1)
         edge_features = self.edge_attr.detach().clone()
         planets_with_transporters = [p for p in planets if p.get('transporter') is not None]
         for p in planets_with_transporters:
             edge_features[self._get_edge_index(p['id'], p['transporter']['destinationIndex'])] = self._get_transporter_features(p)
         #One-hot encode transporter owner
-        transporter_owners = self._owner_one_hot_encoding(edge_features[:, 0].long())
-        edge_features = torch.cat((transporter_owners, edge_features[:, 1:]), dim=1)
+        # transporter_owners = self._owner_one_hot_encoding(edge_features[:, 0].long())
+        # edge_features = torch.cat((transporter_owners, edge_features[:, 1:]), dim=1)
         return Data(
             x=node_features,
             edge_index=self.edge_index,

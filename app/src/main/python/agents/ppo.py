@@ -37,7 +37,7 @@ class Args:
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
     cuda: bool = True
     """if toggled, cuda will be enabled by default"""
-    track: bool = False
+    track: bool = True
     """if toggled, this experiment will be tracked with Weights and Biases"""
     wandb_project_name: str = "planet-wars-ppo"
     """the wandb's project name"""
@@ -49,7 +49,7 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "PlanetWarsForwardModel"
     """the id of the environment. Filled in runtime, either `PlanetWarsForwardModel` or `PlanetWarsForwardModelGNN` according to agent type"""
-    total_timesteps: int = 5000000
+    total_timesteps: int = 2000000
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
@@ -77,13 +77,13 @@ class Args:
     """coefficient of the entropy"""
     vf_coef: float = 0.5
     """coefficient of the value function"""
-    max_grad_norm: float = 0.4
+    max_grad_norm: float = 0.5
     """the maximum norm for the gradient clipping"""
     target_kl: float = None
     """the target KL divergence threshold"""
 
     # Planet Wars specific
-    agent_type: str = "mlp"  # "mlp" or "gnn"
+    agent_type: str = "gnn"  # "mlp" or "gnn"
     num_planets: int = 20
     """number of planets in the game"""
     node_feature_dim: int = 0 #Filled in runtime 5 for gnn, 14 for mlp
@@ -96,7 +96,7 @@ class Args:
     """Filled on run time, mlp uses flattened observation, gnn uses graph observation"""
     
     # Opponent configuration
-    opponent_type: str = "random"  # "random", "greedy", or "do_nothing"
+    opponent_type: str = "greedy"  # "random", "greedy", or "do_nothing"
     """type of opponent to train against"""
 
     # to be filled in runtime
@@ -226,14 +226,14 @@ class PlanetWarsActionWrapper(gym.Wrapper):
 
 
 if __name__ == "__main__":
-
+    
     args = tyro.cli(Args)
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
     args.flatten_observation = args.agent_type != "gnn"
     args.env_id = "PlanetWarsForwardModelGNN" if args.agent_type == "gnn" else "PlanetWarsForwardModel"
-    args.node_feature_dim = 5 if args.agent_type == "gnn" else 10
+    args.node_feature_dim = 3 if args.agent_type == "gnn" else 10
     run_name = f"{args.env_id}__{args.exp_name}__{args.opponent_type}__adj_{args.use_adjacency_matrix}__{args.seed}__{int(time.time())}"
     
     if args.track:
@@ -247,6 +247,8 @@ if __name__ == "__main__":
             monitor_gym=True,
             save_code=True,
         )
+        print(f"Logging code for {os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}")
+        wandb.run.log_code(f"{os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}")
     
     writer = SummaryWriter(f"runs/{run_name}")
     writer.add_text(

@@ -42,6 +42,12 @@ class PlanetWarsAgentMLP(nn.Module):
         
         # Value head
         self.critic = nn.Sequential(
+            layer_init(nn.Linear(total_input_dim, hidden_size)),
+            nn.ReLU(),
+            layer_init(nn.Linear(hidden_size, 256)),
+            nn.ReLU(),
+            layer_init(nn.Linear(256, 128)),
+            nn.ReLU(),
             layer_init(nn.Linear(128, 64)),
             nn.ReLU(),
             layer_init(nn.Linear(64, 1), std=1.0),
@@ -76,15 +82,17 @@ class PlanetWarsAgentMLP(nn.Module):
                        owner_one_hot_encoding(transporter_owners, self.player_id), 
                        x[:, :, 6:]
                        ), dim=-1)
-        features = self.feature_extractor(x.flatten(start_dim=1))
-        return self.critic(features)
+        # features = self.feature_extractor(x.flatten(start_dim=1))
+        return self.critic(x.flatten(start_dim=1))
 
 
     def get_action_and_value(self, x, action=None):
         planet_owners = x[:, :, 0]
         transporter_owners = x[:, :, 5]
-        source_mask = planet_owners == 1
-        target_mask = planet_owners == 2 #TODO check if sending transporters to owned planets is allowed (pretty sure yes)
+        # source_mask = planet_owners == 1
+        source_mask = torch.logical_and(planet_owners == 1, transporter_owners == 0)  # Mask for source actions (only own planets with transporter not busy)
+        target_mask = planet_owners == 2
+        # target_mask = torch.ones_like(source_mask, dtype=torch.bool)  # Mask for target actions, all planets are valid targets initially, source planet will be masked later
 
         x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id), 
                        x[:, :, 1:5],
@@ -103,7 +111,6 @@ class PlanetWarsAgentMLP(nn.Module):
 
 
         # Create masked distributions
-        # TODO: disallow sending transporters to themselves
         source_probs = MaskedCategorical(logits=source_logits, mask=source_mask)
         
         # Ratio distribution
@@ -113,7 +120,6 @@ class PlanetWarsAgentMLP(nn.Module):
         if action is None:
             # Sample actions
             source_action = source_probs.sample()
-            target_mask = planet_owners == 2  # Mask for target actions (only opponent planets)
             target_mask[torch.arange(self.args.num_envs), source_action] = False  # Prevent sending to self
             target_probs = MaskedCategorical(logits=target_logits, mask=target_mask)
             target_action = target_probs.sample()
@@ -121,7 +127,6 @@ class PlanetWarsAgentMLP(nn.Module):
             action = torch.stack([source_action.float(), target_action.float(), ratio_action.squeeze(-1)], dim=-1)
         else:
             source_action = action[:, 0].long()
-            target_mask = planet_owners == 2
             target_mask[torch.arange(self.args.minibatch_size), source_action] = False  # Prevent sending to self
             target_probs = MaskedCategorical(logits=target_logits, mask=target_mask)
             target_action = action[:, 1].long()
@@ -138,7 +143,7 @@ class PlanetWarsAgentMLP(nn.Module):
         # Combined entropy
         total_entropy = source_probs.entropy() + target_probs.entropy() + ratio_probs.entropy().squeeze(-1)
         
-        value = self.critic(features)
+        value = self.critic(x.flatten(start_dim=1))
         
         return action, total_logprob, total_entropy, value
     

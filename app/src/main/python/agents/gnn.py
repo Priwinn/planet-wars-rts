@@ -177,7 +177,10 @@ class PlanetWarsAgentGNN(nn.Module):
             source_action = source_probs.sample()
             
             # Create target mask (opponent planets + neutral, but not source planet)
-            target_mask = (planet_owners != self.player_id).float()  # Not our planets
+            # target_mask = torch.ones_like(planet_owners, dtype=torch.bool)  # All planets
+            # target_mask = (planet_owners != self.player_id).float()  # Not our planets
+            target_mask = (planet_owners != 0).float()  # Not neutrals
+            # target_mask = (planet_owners == 2).float()  #Currently targetting only opponent planets yields better results
             
             # Prevent sending to self
             if batch is None:
