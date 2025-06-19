@@ -1,16 +1,28 @@
 
 
 # Use Java 20 instead of Java 17
-FROM eclipse-temurin:20-jdk
+FROM python:3.11-slim
 
 # Set working directory inside the container
-WORKDIR /app
+WORKDIR .
 
-# Copy the compiled JAR from your Gradle build
-COPY app/build/libs/client-server.jar app.jar
+# Copy requirements file first for better caching
+COPY requirements.txt .
 
-# Expose port 8080 for WebSocket communication
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the Python application
+COPY app/src/main/python .
+
+# Copy models directory
+COPY app/src/main/models ./models
+
+# Add python path to include the src directory
+ENV PYTHONPATH="${PYTHONPATH}:/app/src/main/python"
+
+# Expose port 8080 for the application
 EXPOSE 8080
 
-# Run the Kotlin server
-CMD ["java", "-jar", "app.jar"]
+# Run the Python application
+CMD ["python", "app.py"]

@@ -83,7 +83,7 @@ class Args:
     """the target KL divergence threshold"""
 
     # Planet Wars specific
-    agent_type: str = "gnn"  # "mlp" or "gnn"
+    agent_type: str = "mlp"  # "mlp" or "gnn"
     num_planets: int = 20
     """number of planets in the game"""
     node_feature_dim: int = 0 #Filled in runtime 5 for gnn, 14 for mlp

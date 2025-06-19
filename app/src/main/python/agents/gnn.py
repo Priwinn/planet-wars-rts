@@ -138,8 +138,10 @@ class PlanetWarsAgentGNN(nn.Module):
         target_node_logits = self.target_actor(node_features).squeeze(-1)  # [num_nodes]
         
         # Get ship ratio distribution
-        ratio_mean = torch.sigmoid(self.ratio_actor_mean(global_features))
-        ratio_std = torch.clamp(self.ratio_actor_logstd.exp(), min=0.01, max=0.5)
+        # ratio_mean = torch.sigmoid(self.ratio_actor_mean(global_features))
+        ratio_mean = self.ratio_actor_mean(global_features)
+        # ratio_std = torch.clamp(self.ratio_actor_logstd.exp(), min=0.01, max=0.5)
+        ratio_std = torch.exp(self.ratio_actor_logstd)  
         ratio_probs = Normal(ratio_mean, ratio_std)
         
         if batch is None:
@@ -179,8 +181,8 @@ class PlanetWarsAgentGNN(nn.Module):
             # Create target mask (opponent planets + neutral, but not source planet)
             # target_mask = torch.ones_like(planet_owners, dtype=torch.bool)  # All planets
             # target_mask = (planet_owners != self.player_id).float()  # Not our planets
-            target_mask = (planet_owners != 0).float()  # Not neutrals
-            # target_mask = (planet_owners == 2).float()  #Currently targetting only opponent planets yields better results
+            # target_mask = (planet_owners != 0).float()  # Not neutrals
+            target_mask = (planet_owners == 2).float()  #Currently targetting only opponent planets yields better results
             
             # Prevent sending to self
             if batch is None:

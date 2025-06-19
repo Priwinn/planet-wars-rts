@@ -424,14 +424,14 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
         """Calculate edge features between two planets. Weight is normalized by game width/height and transporter speed."""
         if planet['transporter'] is not None:
             target_planet = self._get_planet_by_id(planet['transporter']['destinationIndex'])
-            distance = np.sqrt(((target_planet['x'] - planet['transporter']['x'])/self.game_params['width'])**2 + ((target_planet['y'] - planet['transporter']['y'])/self.game_params['height'])**2)
+            distance = np.sqrt((target_planet['x'] - planet['transporter']['x'])**2 + (target_planet['y'] - planet['transporter']['y'])**2)
             weight = self.game_params['transporterSpeed'] / (distance ** self.distance_power + 1e-8)
             return torch.FloatTensor([planet['transporter']['owner'], planet['transporter']['numShips'], weight])
         else:
             raise ValueError("Planet does not have a transporter")
     def _get_default_edge_features(self,i,j) -> np.ndarray:
         """Get default edge features for planets without transporters in use"""
-        weight = self.game_params['transporterSpeed'] / (np.sqrt((self._get_planet_by_id(i)['x']/self.game_params['width'] - self._get_planet_by_id(j)['x']/self.game_params['width']) ** 2 + (self._get_planet_by_id(i)['y']/self.game_params['height'] - self._get_planet_by_id(j)['y']/self.game_params['height']) ** 2) ** self.distance_power + 1e-8)
+        weight = self.game_params['transporterSpeed'] / (np.sqrt((self._get_planet_by_id(i)['x'] - self._get_planet_by_id(j)['x']) ** 2 + (self._get_planet_by_id(i)['y'] - self._get_planet_by_id(j)['y']) ** 2) ** self.distance_power + 1e-8)
         return np.array([0.0,0.0, weight], dtype=np.float32)
     def _get_planet_by_id(self, planet_id: int) -> Dict[str, Any]:
         """Get planet data by ID"""
