@@ -12,7 +12,7 @@ from queue import Queue, Empty
 from websockets import serve
 import time
 
-from util.KotlinGameRunnerBridge import KotlinGameRunnerBridge
+from gym_utils.KotlinGameRunnerBridge import KotlinGameRunnerBridge
 from torch_geometric.data import Data
 from client_server.util import RemoteInvocationRequest, RemoteInvocationResponse, deserialize_args, serialize_result
 from core.game_state import Player, camel_to_snake

@@ -7,7 +7,7 @@ import time
 import torch
 from agents.baseline_policies import RandomPolicy, GreedyPolicy
 
-from util.KotlinForwardModelBridge import KotlinForwardModelBridge
+from gym_utils.KotlinForwardModelBridge import KotlinForwardModelBridge
 from torch_geometric.data import Data
 from core.game_state import Player, Action
 
@@ -52,7 +52,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
         self.edge_index = torch.Tensor([[i, j] for i in range(game_params['numPlanets']) for j in range(game_params['numPlanets']) if i != j]).long().permute(1, 0)
 
         self.game_params = game_params or {
-            'maxTicks': max_ticks,
+            'maxTicks': 500,
             'numPlanets': 10,
             'transporterSpeed': 3.0,
             'width': 640,

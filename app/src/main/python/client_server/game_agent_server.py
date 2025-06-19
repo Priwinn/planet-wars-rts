@@ -6,15 +6,20 @@ from typing import Dict, Any, Callable
 
 from agents.random_agents import CarefulRandomAgent
 from agents.greedy_heuristic_agent import GreedyHeuristicAgent
+from agents.planet_wars_agent import PlanetWarsPlayer
+from agents.torch_agent import TorchAgent
+from agents.mlp import PlanetWarsAgentMLP
+from agents.ppo import Args
 from client_server.util import RemoteInvocationRequest, RemoteInvocationResponse, deserialize_args, serialize_result
 from core.game_state import Player, camel_to_snake
 
 
 class GameServerAgent:
-    def __init__(self, host: str = "localhost", port: int = 8765):
+    def __init__(self, host: str = "localhost", port: int = 8765, agent: PlanetWarsPlayer = CarefulRandomAgent):
         self.host = host
         self.port = port
-        self.agent_map: Dict[str, GreedyHeuristicAgent] = {}
+        self.agent_map: Dict[str, PlanetWarsPlayer] = {}
+        self.agent = agent
 
     async def handler(self, websocket):
         async for message in websocket:
@@ -24,7 +29,7 @@ class GameServerAgent:
 
                 if request.requestType == "init":
                     agent_id = str(uuid.uuid4())
-                    agent = GreedyHeuristicAgent()
+                    agent = self.agent
                     self.agent_map[agent_id] = agent
                     result = {"objectId": agent_id}
 
@@ -71,4 +76,5 @@ class GameServerAgent:
 
 
 if __name__ == "__main__":
-    asyncio.run(GameServerAgent(port=8080).start())
+    agent= TorchAgent(model_class=PlanetWarsAgentMLP, weights_path="models/PlanetWarsForwardModel__ppo__greedy__adj_False__1__1750343129_final.pt")
+    asyncio.run(GameServerAgent(port=8080,agent=agent).start())

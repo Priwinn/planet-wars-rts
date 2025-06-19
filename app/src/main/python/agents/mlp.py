@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.distributions import Normal, Categorical
 import numpy as np
-from util.gym_wrapper import owner_one_hot_encoding
+from gym_utils.gym_wrapper import owner_one_hot_encoding
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
@@ -178,13 +178,15 @@ class PlanetWarsAgentMLP(nn.Module):
         # Select highest probability actions
         # Note: In test time, we select the action with the highest probability instead of sampling
         source_action = source_probs.probs.argmax(dim=-1)
-        target_mask[torch.arange(self.args.num_envs), source_action] = False  # Prevent sending to self
+        target_mask[0, source_action] = False  # Prevent sending to self
         target_probs = MaskedCategorical(logits=target_logits, mask=target_mask)
         target_action = target_probs.probs.argmax(dim=-1)
         ratio_action = torch.clamp(ratio_action, 0.0, 0.99)
         action = [source_action.float(), target_action.float(), ratio_action.squeeze(-1)]
 
         return action
+    
+
     
 class MaskedCategorical(Categorical):
     """Categorical distribution with action masking"""

@@ -72,15 +72,9 @@ class KotlinForwardModelBridge:
         else:
             self.game_params = self._create_game_params_from_dict(game_params)
         
-
-        # Create game state 
-        if self.initial_game_state is not None and self.fixed_map:
-            # If we have an initial game state, use it
-            self.game_state = self.initial_game_state.deepCopy()
-        else:
-            game_state_factory = self.GameStateFactory(self.game_params)
-            self.game_state = game_state_factory.createGame()
-            self.initial_game_state = self.game_state.deepCopy()  # Store initial state for cloning
+        # Create game state
+        game_state_factory = self.GameStateFactory(self.game_params)
+        self.game_state = game_state_factory.createGame()
         
         # Create forward model
         self.forward_model = self.ForwardModel(self.game_state, self.game_params)

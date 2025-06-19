@@ -19,7 +19,7 @@ from torch.distributions.categorical import Categorical
 from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
-from util.gym_wrapper import PlanetWarsForwardModelEnv, PlanetWarsForwardModelGNNEnv
+from gym_utils.gym_wrapper import PlanetWarsForwardModelEnv, PlanetWarsForwardModelGNNEnv
 from core.game_state import Player
 from agents.mlp import PlanetWarsAgentMLP
 from agents.gnn import PlanetWarsAgentGNN, GraphInstanceToPyG
