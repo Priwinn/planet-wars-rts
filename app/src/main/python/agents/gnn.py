@@ -240,6 +240,55 @@ class PlanetWarsAgentGNN(nn.Module):
         
         return action, total_logprob, total_entropy, value
 
+    def get_action(self, data):
+        with torch.no_grad():
+            node_features, global_features = self.forward_gnn(data.x, data.edge_index, data.edge_attr)
+
+            # Get per-node logits for source and target selection
+            source_node_logits = self.source_actor(node_features).squeeze(-1)  # [num_nodes]
+            target_node_logits = self.target_actor(node_features).squeeze(-1)  # [num_nodes]
+            
+            # Get ship ratio distribution
+            ratio_mean = self.ratio_actor_mean(global_features)
+
+                
+            source_logits = source_node_logits.unsqueeze(0)  # [1, num_planets]
+            target_logits = target_node_logits.unsqueeze(0)  # [1, num_planets]
+            
+            # Get masks from node features (owner is first feature)
+            planet_owners = data.x[:, 0].unsqueeze(0)  # [1, num_planets]
+
+            
+            # Create masks
+            source_mask = (planet_owners == self.player_id).float()  # Own planets
+            
+            # Create masked distributions for source selection
+            source_probs = MaskedCategorical(logits=source_logits, mask=source_mask)
+            
+            # Take highest probability source action
+            source_action = source_probs.probs.argmax(dim=-1)  # [1]
+            
+            # Create target mask
+            target_mask = (planet_owners == 2).float()  #Currently targetting only opponent planets yields better results
+            
+            # Prevent sending to self
+            target_mask[0, source_action[0]] = 0
+
+            
+            target_probs = MaskedCategorical(logits=target_logits, mask=target_mask)
+            target_action = target_probs.probs.argmax(dim=-1)  # [1]
+            
+            # Take mean for test time
+            ratio_action = torch.clamp(ratio_mean, 0.0, 0.99)
+            
+            action = torch.cat([
+                source_action.float(),
+                target_action.float(),
+                ratio_action.squeeze(-1)
+            ], dim=-1)
+  
+
+        return action
 
 class MaskedCategorical(Categorical):
     """Categorical distribution with action masking"""

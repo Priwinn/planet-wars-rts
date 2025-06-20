@@ -149,40 +149,41 @@ class PlanetWarsAgentMLP(nn.Module):
         return action, total_logprob, total_entropy, value
     def get_action(self, x):
         """Get action for test time."""
-        planet_owners = x[:, :, 0]
-        transporter_owners = x[:, :, 5]
-        source_mask = planet_owners == 1
-        # source_mask = torch.logical_and(planet_owners == 1, transporter_owners == 0)  # Mask for source actions (only own planets with transporter not busy)
-        target_mask = planet_owners == 2
-        # target_mask = torch.ones_like(source_mask, dtype=torch.bool)  # Mask for target actions, all planets are valid targets initially, source planet will be masked later
+        with torch.no_grad():
+            planet_owners = x[:, :, 0]
+            transporter_owners = x[:, :, 5]
+            source_mask = planet_owners == 1
+            # source_mask = torch.logical_and(planet_owners == 1, transporter_owners == 0)  # Mask for source actions (only own planets with transporter not busy)
+            target_mask = planet_owners == 2
+            # target_mask = torch.ones_like(source_mask, dtype=torch.bool)  # Mask for target actions, all planets are valid targets initially, source planet will be masked later
 
-        x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id), 
-                       x[:, :, 1:5],
-                       owner_one_hot_encoding(transporter_owners, self.player_id), 
-                       x[:, :, 6:]
-                       ), dim=-1)
+            x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id), 
+                        x[:, :, 1:5],
+                        owner_one_hot_encoding(transporter_owners, self.player_id), 
+                        x[:, :, 6:]
+                        ), dim=-1)
 
-        
-        features = self.feature_extractor(x.flatten(start_dim=1))
-        
-        # Get action distributions
-        source_logits = self.source_actor(features)
-        target_logits = self.target_actor(features)
-        # We take mean of the ratio actor as the action during test time
-        ratio_action = torch.sigmoid(self.ratio_actor_mean(features))  
-        # ratio_mean = self.ratio_actor_mean(features)
-        
-        # Create masked distributions
-        source_probs = MaskedCategorical(logits=source_logits, mask=source_mask)
-        
-        # Select highest probability actions
-        # Note: In test time, we select the action with the highest probability instead of sampling
-        source_action = source_probs.probs.argmax(dim=-1)
-        target_mask[0, source_action] = False  # Prevent sending to self
-        target_probs = MaskedCategorical(logits=target_logits, mask=target_mask)
-        target_action = target_probs.probs.argmax(dim=-1)
-        ratio_action = torch.clamp(ratio_action, 0.0, 0.99)
-        action = [source_action.float(), target_action.float(), ratio_action.squeeze(-1)]
+            
+            features = self.feature_extractor(x.flatten(start_dim=1))
+            
+            # Get action distributions
+            source_logits = self.source_actor(features)
+            target_logits = self.target_actor(features)
+            # We take mean of the ratio actor as the action during test time
+            ratio_action = torch.sigmoid(self.ratio_actor_mean(features))  
+            # ratio_mean = self.ratio_actor_mean(features)
+            
+            # Create masked distributions
+            source_probs = MaskedCategorical(logits=source_logits, mask=source_mask)
+            
+            # Select highest probability actions
+            # Note: In test time, we select the action with the highest probability instead of sampling
+            source_action = source_probs.probs.argmax(dim=-1)
+            target_mask[0, source_action] = False  # Prevent sending to self
+            target_probs = MaskedCategorical(logits=target_logits, mask=target_mask)
+            target_action = target_probs.probs.argmax(dim=-1)
+            ratio_action = torch.clamp(ratio_action, 0.0, 0.99)
+            action = [source_action.float(), target_action.float(), ratio_action.squeeze(-1)]
 
         return action
     

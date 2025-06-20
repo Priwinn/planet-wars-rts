@@ -9,6 +9,8 @@ from agents.greedy_heuristic_agent import GreedyHeuristicAgent
 from agents.planet_wars_agent import PlanetWarsPlayer
 from agents.torch_agent import TorchAgent
 from agents.mlp import PlanetWarsAgentMLP
+from agents.torch_agent_gnn import TorchAgentGNN
+from agents.gnn import PlanetWarsAgentGNN
 from agents.ppo import Args
 from client_server.util import RemoteInvocationRequest, RemoteInvocationResponse, deserialize_args, serialize_result
 from core.game_state import Player, camel_to_snake
@@ -76,5 +78,5 @@ class GameServerAgent:
 
 
 if __name__ == "__main__":
-    agent= TorchAgent(model_class=PlanetWarsAgentMLP, weights_path="models/PlanetWarsForwardModel__ppo__greedy__adj_False__1__1750343129_final.pt")
+    agent= TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models\\PlanetWarsForwardModelGNN__ppo__greedy__adj_False__1__1750368017_iter_500.pt")  
     asyncio.run(GameServerAgent(port=8080,agent=agent).start())
