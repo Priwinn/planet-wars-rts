@@ -6,8 +6,8 @@ import subprocess
 from typing import List
 from runner_utils.process_issue import process_issue
 
-POLL_INTERVAL = 10       # seconds
-EVALUATION_TIMEOUT = 300  # seconds (5 minutes)
+POLL_INTERVAL = 60       # seconds
+EVALUATION_TIMEOUT = 600  # seconds (10 minutes)
 # Your GitHub repo and personal access token
 REPO = "SimonLucas/planet-wars-rts-submissions"
 
@@ -56,8 +56,8 @@ def poll_and_process(repo: str, github_token: str, base_dir: Path):
 
 
                 # Check if already being processed
-                if any(label["name"] == "processing" for label in issue["labels"]):
-                    continue
+                # if any(label["name"] == "processing" for label in issue["labels"]):
+                #     continue
 
                 print(f"⚙️ Processing issue #{issue_number}: {issue['title']} at {current_time}")
 
