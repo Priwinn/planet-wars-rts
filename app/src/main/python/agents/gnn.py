@@ -156,6 +156,8 @@ class PlanetWarsAgentGNN(nn.Module):
             
             # Get masks from node features (owner is first feature)
             planet_owners = data.x[:, 0].unsqueeze(0)  # [1, num_planets]
+            transporter_owners = data.edge_attr[:, 0].view(num_planets,num_planets-1).unsqueeze(0) # [1, num_planets, num_planets-1]
+            transporter_owners = torch.sum(transporter_owners, dim=2) > 0  # [1, num_planets]
         else:
             # Batch case
             batch_size = batch.max().item() + 1
@@ -167,9 +169,11 @@ class PlanetWarsAgentGNN(nn.Module):
             
             # Get planet owners
             planet_owners = data.x[:, 0].view(batch_size, num_planets)
-        
+            transporter_owners = data.edge_attr.view(batch_size, num_planets,num_planets-1,3) [:,:,:, 0]
+            transporter_owners = torch.sum(transporter_owners, dim=2) > 0  
+
         # Create masks
-        source_mask = (planet_owners == self.player_id).float()  # Own planets
+        source_mask = torch.logical_and(planet_owners == 1, transporter_owners == 0) 
         
         # Create masked distributions for source selection
         source_probs = MaskedCategorical(logits=source_logits, mask=source_mask)
@@ -257,10 +261,12 @@ class PlanetWarsAgentGNN(nn.Module):
             
             # Get masks from node features (owner is first feature)
             planet_owners = data.x[:, 0].unsqueeze(0)  # [1, num_planets]
+            transporter_owners = data.edge_attr.view(1,num_planets,num_planets-1,3) [:,:, 0]
+            transporter_owners = torch.sum(transporter_owners, dim=2) > 0  
 
             
             # Create masks
-            source_mask = (planet_owners == self.player_id).float()  # Own planets
+            source_mask = torch.logical_and(planet_owners == 1, transporter_owners == 0)
             
             # Create masked distributions for source selection
             source_probs = MaskedCategorical(logits=source_logits, mask=source_mask)

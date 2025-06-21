@@ -20,7 +20,7 @@ class TorchAgent(PlanetWarsPlayer):
         self.model = model_class(state_dict['args'])
         self.model.load_state_dict(state_dict['model_state_dict']) if model_class and weights_path else None
         self.game_params = {
-            'maxTicks': 20000,
+            'maxTicks': 2000,
             'numPlanets': 20,
             'transporterSpeed': 3.0,
             'width': 640,
@@ -31,6 +31,10 @@ class TorchAgent(PlanetWarsPlayer):
         x = self.dict_to_tensor(x).unsqueeze(0)  # Add batch dimension
 
         action = self.model.get_action(x)
+        if self.player_id == 2:
+            half = self.params.num_planets // 2
+            action[0] = (action[0] + half) % self.params.num_planets  # Adjust source planet index
+            action[1] = (action[1] + half) % self.params.num_planets  # Adjust destination planet index
 
         return Action(
             player_id=self.player,
@@ -51,6 +55,10 @@ class TorchAgent(PlanetWarsPlayer):
         for planet in planets:
             planet_features = self._get_planet_features(planet)
             features.append(planet_features)
+        if self.player_id == 2:
+            # Swap first half of planets with second half 
+            half = len(features) // 2
+            features = features[half:] + features[:half]
         
         # Stack all planet features into a single tensor
         return torch.tensor(np.stack(features), dtype=torch.float32)
@@ -90,14 +98,15 @@ class TorchAgent(PlanetWarsPlayer):
             'vy': float(transporter.v.y)
         }
     def _get_planet_features(self, planet: Dict[str, Any]) -> np.ndarray:
-        """Extract features from a single planet"""
+        """Extract features from a single planet. Model is only trained as playerr 1 so we mirror the features for player 2."""
         features = [
             planet['owner'],  # Owner ID
             planet['numShips'],  # Number of ships
             planet['growthRate'],  # Growth rate
-            planet['x'] / self.game_params['width'],  # X coordinate
-            planet['y'] / self.game_params['height']  # Y coordinate
+            planet['x'] / self.game_params['width'] if self.player_id == 1 else 1 - (planet['x'] / self.game_params['width']),  # X coordinate
+            planet['y'] / self.game_params['height'] if self.player_id == 1 else 1 - (planet['y'] / self.game_params['height'])  # Y coordinate
         ]
+
         
         # Add transporter info if available
         if planet.get('transporter'):
@@ -111,14 +120,21 @@ class TorchAgent(PlanetWarsPlayer):
                 # 2.- Use edge features for transporters
                 transporter['numShips'],
                 # Normalized transporter position
-                transporter['x']*transporter['vx']/(self.game_params['width'] * self.game_params['transporterSpeed']),
-                transporter['y']*transporter['vy']/(self.game_params['height'] * self.game_params['transporterSpeed']),
+                transporter['x']*transporter['vx']/(self.game_params['width'] * self.game_params['transporterSpeed']) if self.player_id == 1 else
+                (self.game_params['width'] - transporter['x'])*transporter['vx']/(self.game_params['width'] * self.game_params['transporterSpeed']),
+                transporter['y']*transporter['vy']/(self.game_params['height'] * self.game_params['transporterSpeed']) if self.player_id == 1 else
+                (self.game_params['height'] - transporter['y'])*transporter['vy']/(self.game_params['height'] * self.game_params['transporterSpeed']),
                 # transporter['vx'],
                 # transporter['vy']
             ])
         else:
             features.extend([0, 0, 0, 0, 0])
         return np.array(features, dtype=np.float32)
+    
+    def prepare_to_play_as(self, player: Player, params: GameParams, opponent: str | None = ...) -> str:
+        self.model.player_id = 1 if player == Player.Player1 else 2
+        self.player_id = self.model.player_id
+        return super().prepare_to_play_as(player, params, opponent)
     
 
 

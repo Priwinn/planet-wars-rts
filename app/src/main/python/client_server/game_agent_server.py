@@ -82,4 +82,5 @@ class GameServerAgent:
 if __name__ == "__main__":
 
     agent= TorchAgent(model_class=PlanetWarsAgentMLP, weights_path="models/PlanetWarsForwardModel__ppo__random__adj_False__1__1750435224_final.pt")  
-    asyncio.run(GameServerAgent(host="0.0.0.0", port=8080, agent=agent).start())
+    asyncio.run(GameServerAgent(host="localhost", port=8080, agent=agent).start())
+    #Use 0.0.0.0 for container access

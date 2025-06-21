@@ -150,16 +150,22 @@ class PlanetWarsAgentMLP(nn.Module):
     def get_action(self, x):
         """Get action for test time."""
         with torch.no_grad():
-            planet_owners = x[:, :, 0]
-            transporter_owners = x[:, :, 5]
+            if self.player_id == 1:
+                planet_owners = x[:, :, 0]
+                transporter_owners = x[:, :, 5]
+            else:
+                # This maps 0 to 0, 1 to 2, and 2 to 1
+                planet_owners = (x[:, :, 0] * 2) % 3
+                transporter_owners = (x[:, :, 5] * 2) % 3 
             # source_mask = planet_owners == 1
             source_mask = torch.logical_and(planet_owners == 1, transporter_owners == 0)  # Mask for source actions (only own planets with transporter not busy)
             target_mask = planet_owners == 2
             # target_mask = torch.ones_like(source_mask, dtype=torch.bool)  # Mask for target actions, all planets are valid targets initially, source planet will be masked later
 
-            x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id), 
+            # One-hot encode planet owners and transporter owners, we already swapped the owners so we assume player_id is 1 (for this method)
+            x = torch.cat((owner_one_hot_encoding(planet_owners, 1), 
                         x[:, :, 1:5],
-                        owner_one_hot_encoding(transporter_owners, self.player_id), 
+                        owner_one_hot_encoding(transporter_owners, 1), 
                         x[:, :, 6:]
                         ), dim=-1)
 

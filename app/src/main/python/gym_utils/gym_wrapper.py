@@ -18,7 +18,7 @@ def owner_one_hot_encoding(owner: torch.Tensor, player_id: int) -> torch.Tensor:
     )
     # Swap controlled and opponent if needed
     if player_id == 2:
-        one_hot = one_hot[[0, 2, 1], :]
+        one_hot = one_hot[:, :, [0, 2, 1]]
     return one_hot
 
 class PlanetWarsForwardModelEnv(gym.Env):
@@ -406,7 +406,7 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
         return Data(
             x=node_features,
             edge_index=self.edge_index,
-            edge_attr=edge_features[:,0]
+            edge_attr=edge_features
         )
 
 
