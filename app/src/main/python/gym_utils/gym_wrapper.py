@@ -325,13 +325,28 @@ class PlanetWarsForwardModelEnv(gym.Env):
         
         return (controlled_player_score - opponent_score) / self.game_params['maxTicks']
     
+    def _calculate_growth_rate(self, game_state: Dict[str, Any]) -> float:
+        """Calculate growth rate based on game state for the controlled player"""
+        planets = game_state['planets']
+        
+        controlled_growth = 0
+        
+        # Growth rate based on owned planets
+        for planet in planets:
+            if planet['owner'] == self.player_int:
+                controlled_growth += planet['growthRate']
+        return controlled_growth
+    
+    
     def _calculate_reward(self, game_state: Dict[str, Any]) -> float:
         """Calculate reward based on game state for the controlled player"""
-        current_score = self._calculate_normalized_score_delta(game_state)
+        # current_score = self._calculate_normalized_score_delta(game_state)
+        current_score = self._calculate_growth_rate(game_state)
         
         # Reward is the change in score since last step
-        reward = current_score - self.previous_score
-        self.previous_score = current_score
+        # reward = current_score - self.previous_score
+        # self.previous_score = current_score
+        reward = current_score
         
         # If game is terminal, give a final reward based on outcome
         if game_state['isTerminal'] or game_state['tick'] >= self.max_ticks:

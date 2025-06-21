@@ -2,9 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal, Categorical
-from torch_geometric.nn import GCNConv, GATConv, global_mean_pool, global_max_pool
+from torch_geometric.nn import GCNConv, GATConv, global_mean_pool, global_max_pool, GATv2Conv
 from torch_geometric.data import Data, Batch
 from typing import Tuple, Union, List
+from gym_utils.gym_wrapper import owner_one_hot_encoding
 
 import numpy as np
 from gymnasium.spaces import GraphInstance
@@ -35,7 +36,7 @@ class PlanetWarsAgentGNN(nn.Module):
 
         
         # Node feature dimension from gym wrapper
-        self.node_feature_dim = args.node_feature_dim
+        self.node_feature_dim = args.node_feature_dim + 2 # +2 for planet owner one-hot encodings
         
         # GNN layers (edge weights)
         # self.conv1 = GCNConv(self.node_feature_dim, 64)
@@ -43,10 +44,14 @@ class PlanetWarsAgentGNN(nn.Module):
         # self.conv3 = GCNConv(128, 64)
         
         # Graph Attention Network layers (edge features)
-        self.conv1 = GATConv(self.node_feature_dim, 64, heads=4, concat=True)
-        self.conv2 = GATConv(64*4, 128, heads=4, concat=True)
-        self.conv3 = GATConv(128*4, 64, heads=1, concat=False)
-        
+        self.v_conv1 = GATv2Conv(self.node_feature_dim, 64, heads=4, concat=True, edge_dim=5)
+        self.v_conv2 = GATv2Conv(64*4, 128, heads=4, concat=True, edge_dim=5)
+        self.v_conv3 = GATv2Conv(128*4, 64, heads=1, concat=False, edge_dim=5)
+
+        self.a_conv1 = GATv2Conv(self.node_feature_dim, 64, heads=4, concat=True, edge_dim=5)
+        self.a_conv2 = GATv2Conv(64*4, 128, heads=4, concat=True, edge_dim=5)
+        self.a_conv3 = GATv2Conv(128*4, 64, heads=1, concat=False, edge_dim=5)
+
         # Global graph feature extraction
         self.global_pool = global_mean_pool
         
@@ -96,9 +101,11 @@ class PlanetWarsAgentGNN(nn.Module):
     def forward_gnn(self, x, edge_index, edge_attr, batch=None):
         """Forward pass through GNN layers"""
         # GNN forward pass
-        h = F.relu(self.conv1(x, edge_index, edge_attr))
-        h = F.relu(self.conv2(h, edge_index, edge_attr))
-        h = self.conv3(h, edge_index, edge_attr)
+        h = F.relu(self.a_conv1(x, edge_index, edge_attr))
+        h = F.relu(self.a_conv2(h, edge_index, edge_attr))
+        h = self.a_conv3(h, edge_index, edge_attr)
+
+        
 
         # Per-node features
         node_features = self.node_mlp(h)
@@ -114,6 +121,25 @@ class PlanetWarsAgentGNN(nn.Module):
         global_features = self.global_mlp(global_features)
         
         return node_features, global_features
+    
+    def forward_value_gnn(self, x, edge_index, edge_attr, batch=None):
+        """Forward pass through GNN layers for value estimation"""
+        # GNN forward pass
+        h = F.relu(self.v_conv1(x, edge_index, edge_attr))
+        h = F.relu(self.v_conv2(h, edge_index, edge_attr))
+        h = self.v_conv3(h, edge_index, edge_attr)
+
+        # Global features
+        if batch is None:
+            # Single graph case
+            global_features = torch.mean(h, dim=0, keepdim=True)
+        else:
+            # Batch case
+            global_features = self.global_pool(h, batch)
+        
+        global_features = self.global_mlp(global_features)
+        
+        return h, global_features
 
 
     def get_value(self, obs):
@@ -121,9 +147,14 @@ class PlanetWarsAgentGNN(nn.Module):
         if isinstance(obs, Union[Tuple, List]):
             obs = Batch.from_data_list(obs)
         data, batch = obs, obs.batch
+        planet_owners = data.x[:, 0]
+        transporter_owners_per_edge = data.edge_attr[:, 0]
+        x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id),
+                       data.x[:, 1:]), dim=-1)
+        edge_attr=torch.cat((owner_one_hot_encoding(transporter_owners_per_edge, self.player_id),
+                            data.edge_attr[:, 1:]), dim=-1)
 
-
-        _, global_features = self.forward_gnn(data.x, data.edge_index, data.edge_attr, batch)
+        _, global_features = self.forward_value_gnn(x, data.edge_index, edge_attr, batch)
         return self.critic(global_features)
 
     def get_action_and_value(self, obs, action=None):
@@ -131,46 +162,58 @@ class PlanetWarsAgentGNN(nn.Module):
         if isinstance(obs, Union[Tuple, List]):
             obs = Batch.from_data_list(obs)
         data, batch = obs, obs.batch
-        node_features, global_features = self.forward_gnn(data.x, data.edge_index, data.edge_attr, batch)
 
-        # Get per-node logits for source and target selection
-        source_node_logits = self.source_actor(node_features).squeeze(-1)  # [num_nodes]
-        target_node_logits = self.target_actor(node_features).squeeze(-1)  # [num_nodes]
-        
-        # Get ship ratio distribution
-        # ratio_mean = torch.sigmoid(self.ratio_actor_mean(global_features))
-        ratio_mean = self.ratio_actor_mean(global_features)
-        # ratio_std = torch.clamp(self.ratio_actor_logstd.exp(), min=0.01, max=0.5)
-        ratio_std = torch.exp(self.ratio_actor_logstd)  
-        ratio_probs = Normal(ratio_mean, ratio_std)
-        
         if batch is None:
             # Single graph case
-            num_envs = 1
             batch_size = 1
             num_planets = data.x.size(0)
-            
-            # Reshape logits for masking #TODO:Fix this for onehot
-            source_logits = source_node_logits.unsqueeze(0)  # [1, num_planets]
-            target_logits = target_node_logits.unsqueeze(0)  # [1, num_planets]
-            
+
             # Get masks from node features (owner is first feature)
             planet_owners = data.x[:, 0].unsqueeze(0)  # [1, num_planets]
-            transporter_owners = data.edge_attr[:, 0].view(num_planets,num_planets-1).unsqueeze(0) # [1, num_planets, num_planets-1]
-            transporter_owners = torch.sum(transporter_owners, dim=2) > 0  # [1, num_planets]
+            transporter_owners_per_edge = data.edge_attr[:, 0].view(num_planets,num_planets-1).unsqueeze(0) # [1, num_planets, num_planets-1]
+            transporter_owners = torch.sum(transporter_owners_per_edge, dim=2) > 0  # [1, num_planets]
         else:
             # Batch case
             batch_size = batch.max().item() + 1
             num_planets = self.args.num_planets
-            
-            # Reshape node logits to [batch_size, num_planets]
-            source_logits = source_node_logits.view(batch_size, num_planets)
-            target_logits = target_node_logits.view(batch_size, num_planets)
-            
+     
             # Get planet owners
             planet_owners = data.x[:, 0].view(batch_size, num_planets)
-            transporter_owners = data.edge_attr.view(batch_size, num_planets,num_planets-1,3) [:,:,:, 0]
-            transporter_owners = torch.sum(transporter_owners, dim=2) > 0  
+            transporter_owners_per_edge = data.edge_attr.view(batch_size, num_planets,num_planets-1,3) [:,:,:, 0]
+            transporter_owners = torch.sum(transporter_owners_per_edge, dim=2) > 0
+
+        #one-hot encode planet owners and transporter owners
+
+        data.x = torch.cat((owner_one_hot_encoding(planet_owners.view(-1), self.player_id),
+                           data.x[:, 1:]),
+                          dim=-1)
+        data.edge_attr = torch.cat((owner_one_hot_encoding(transporter_owners_per_edge.view(-1), self.player_id),
+                                   data.edge_attr[:, 1:]), dim=-1)
+
+        node_features, global_features = self.forward_gnn(data.x, data.edge_index, data.edge_attr, batch)
+        _, v_global_features = self.forward_value_gnn(data.x, data.edge_index, data.edge_attr, batch)
+
+        # Get per-node logits for source and target selection
+        source_node_logits = self.source_actor(node_features).squeeze(-1)  # [num_nodes]
+        target_node_logits = self.target_actor(node_features).squeeze(-1)  # [num_nodes]
+
+        if batch is None:
+            # Single graph case
+            source_logits = source_node_logits.unsqueeze(0)
+            target_logits = target_node_logits.unsqueeze(0)
+        else:
+            # Batch case
+            source_logits = source_node_logits.view(batch_size, -1)
+            target_logits = target_node_logits.view(batch_size, -1)
+        
+        # Get ship ratio distribution
+        ratio_mean = torch.sigmoid(self.ratio_actor_mean(global_features))
+        # ratio_mean = self.ratio_actor_mean(global_features)
+        ratio_std = torch.clamp(self.ratio_actor_logstd.exp(), min=0.01, max=0.5)
+        # ratio_std = torch.exp(self.ratio_actor_logstd)  
+        ratio_probs = Normal(ratio_mean, ratio_std)
+        
+
 
         # Create masks
         source_mask = torch.logical_and(planet_owners == 1, transporter_owners == 0) 
@@ -240,7 +283,7 @@ class PlanetWarsAgentGNN(nn.Module):
         total_entropy = source_probs.entropy() + target_probs.entropy() + ratio_probs.entropy().squeeze(-1)
         
         # Get value
-        value = self.critic(global_features)
+        value = self.critic(v_global_features)
         
         return action, total_logprob, total_entropy, value
 
@@ -253,7 +296,9 @@ class PlanetWarsAgentGNN(nn.Module):
             target_node_logits = self.target_actor(node_features).squeeze(-1)  # [num_nodes]
             
             # Get ship ratio distribution
+            # ratio_mean = torch.sigmoid(self.ratio_actor_mean(global_features))
             ratio_mean = self.ratio_actor_mean(global_features)
+            
 
                 
             source_logits = source_node_logits.unsqueeze(0)  # [1, num_planets]
