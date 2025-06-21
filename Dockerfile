@@ -1,6 +1,5 @@
 
 
-# Use Java 20 instead of Java 17
 FROM python:3.11-slim
 
 # Set working directory inside the container
@@ -13,16 +12,16 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the Python application
-COPY app/src/main/python .
+COPY app/src/main/python ./app
 
 # Copy models directory
-COPY app/src/main/models ./models
+COPY models ./models
 
-# Add python path to include the src directory
-ENV PYTHONPATH="${PYTHONPATH}:/app/src/main/python"
+# Add python path to include the src directory 
+ENV PYTHONPATH="${PYTHONPATH}:/app"
 
 # Expose port 8080 for the application
 EXPOSE 8080
 
 # Run the Python application
-CMD ["python", "app.py"]
+CMD ["python","-u","app/client_server/game_agent_server.py"]

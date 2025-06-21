@@ -53,7 +53,6 @@ class GameServerAgent:
                     # print(f"Deserialized args: {args}")
                     result = method(*args)
                     result = serialize_result(result)
-
                 elif request.requestType == "end":
                     removed = self.agent_map.pop(request.objectId, None)
                     msg = "Agent removed" if removed else "No such agent"
@@ -63,11 +62,14 @@ class GameServerAgent:
                     raise ValueError(f"Unknown request type: {request.requestType}")
 
                 response = RemoteInvocationResponse(status="ok", result=result)
-                print(f"Sending response: {response}")
+                # print(f"Sending response: {response}")
 
             except Exception as e:
                 print(f"Error handling message: {e}")
                 response = RemoteInvocationResponse(status="error", error=str(e))
+            
+            # end_time = time.time()
+            # print(f"Method took {end_time - start_time:.4f} seconds")
 
             await websocket.send(response.model_dump_json())
 
@@ -78,5 +80,6 @@ class GameServerAgent:
 
 
 if __name__ == "__main__":
-    agent= TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models\\PlanetWarsForwardModelGNN__ppo__greedy__adj_False__1__1750368017_iter_500.pt")  
-    asyncio.run(GameServerAgent(port=8080,agent=agent).start())
+
+    agent= TorchAgent(model_class=PlanetWarsAgentMLP, weights_path="models/PlanetWarsForwardModel__ppo__random__adj_False__1__1750435224_final.pt")  
+    asyncio.run(GameServerAgent(host="0.0.0.0", port=8080, agent=agent).start())

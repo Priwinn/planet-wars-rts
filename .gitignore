@@ -85,8 +85,9 @@ __pycache__/
 app/src/main/python/runner_utils/competition_entries.py
 
 runs/
-models/
+models/*
 bash_scripts/
 venv/
 logs/
 wandb/
+!models/PlanetWarsForwardModel__ppo__random__adj_False__1__1750435224_final.pt

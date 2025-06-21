@@ -89,8 +89,8 @@ class PlanetWarsAgentMLP(nn.Module):
     def get_action_and_value(self, x, action=None):
         planet_owners = x[:, :, 0]
         transporter_owners = x[:, :, 5]
-        source_mask = planet_owners == 1
-        # source_mask = torch.logical_and(planet_owners == 1, transporter_owners == 0)  # Mask for source actions (only own planets with transporter not busy)
+        #source_mask = planet_owners == 1
+        source_mask = torch.logical_and(planet_owners == 1, transporter_owners == 0)  # Mask for source actions (only own planets with transporter not busy)
         target_mask = planet_owners == 2
         # target_mask = torch.ones_like(source_mask, dtype=torch.bool)  # Mask for target actions, all planets are valid targets initially, source planet will be masked later
 
@@ -152,8 +152,8 @@ class PlanetWarsAgentMLP(nn.Module):
         with torch.no_grad():
             planet_owners = x[:, :, 0]
             transporter_owners = x[:, :, 5]
-            source_mask = planet_owners == 1
-            # source_mask = torch.logical_and(planet_owners == 1, transporter_owners == 0)  # Mask for source actions (only own planets with transporter not busy)
+            # source_mask = planet_owners == 1
+            source_mask = torch.logical_and(planet_owners == 1, transporter_owners == 0)  # Mask for source actions (only own planets with transporter not busy)
             target_mask = planet_owners == 2
             # target_mask = torch.ones_like(source_mask, dtype=torch.bool)  # Mask for target actions, all planets are valid targets initially, source planet will be masked later
 

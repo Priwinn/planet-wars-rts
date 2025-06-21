@@ -81,7 +81,7 @@ java {
 }
 
 application {
-    mainClass.set("games.planetwars.runners.Py4JGatewayServerKt") // Adjust this if your package structure is different
+    mainClass.set("games.planetwars.runners.RunEntryAsServerKt") // Adjust this if your package structure is different
 }
 
 kotlin {
