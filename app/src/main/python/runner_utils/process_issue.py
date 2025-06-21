@@ -46,6 +46,7 @@ def process_issue(issue: dict, base_dir: Path, github_token: str, timeout_second
     agent_data = process_commit_hash(agent_data)  # Normalize commit hash if needed
 
     agent = AgentEntry(**agent_data)
+    agent.id = agent.id.lower()
 
     # --- Step 2: Clone and build ---
     comment_on_issue(repo, issue_number, f"🔍 Processing submission for `{agent.id}`", github_token)

@@ -20,7 +20,7 @@ fun main() {
     agents.add(GreedyHeuristicAgent())
     val remoteAgent = RemoteAgent("<specified by remote server>", port = 9003)
 
-    agents.add(remoteAgent)
+//    agents.add(remoteAgent)
 //    val agents = SamplePlayerLists().getFullList()
 //    agents.add(DoNothingAgent())
     val league = RoundRobinLeague(agents, gameParams = gameParams, gamesPerPair = 10, runRemoteAgents = true)
