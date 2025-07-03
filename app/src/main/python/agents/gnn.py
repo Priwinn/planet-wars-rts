@@ -262,8 +262,9 @@ class PlanetWarsAgentGNN(nn.Module):
             ratio_action = action[:, 2]
             
             # Create target mask for log probability calculation
-            target_mask = (planet_owners != self.player_id).float()
-            
+            target_mask = (planet_owners == 3-self.player_id).float()
+
+            # Avoid sending to self
             if batch is None:
                 target_mask[0, source_action[0]] = 0
             else:
