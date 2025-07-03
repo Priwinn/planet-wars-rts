@@ -26,6 +26,7 @@ class GameAgentServer(
     private var frameCount = 0
 
     fun start(wait: Boolean = true) {
+        println("Starting GameAgentServer on port $port with agent class ${agentClass.simpleName}...")
         server = embeddedServer(Netty, port = port) {
             install(WebSockets)
             routing {
@@ -93,6 +94,7 @@ class GameAgentServer(
 
     fun stop() {
         server?.stop(gracePeriodMillis = 1000, timeoutMillis = 2000)
+        println("GameAgentServer stopped agent $agentClass after $frameCount frames.")
     }
 
     private fun decodeArgument(p: KParameter, jsonArg: JsonElement): Any = when (p.type.classifier) {

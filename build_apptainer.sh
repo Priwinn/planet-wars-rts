@@ -1,8 +1,7 @@
 #!/bin/bash
 #$ -cwd
 #$ -N apptainer_build
-#$ -q short.q
-#$ -l h_rt=00:30:00
+#$ -l h_rt=1:00:00
 #$ -o build_output.log
 #$ -e build_error.log
 

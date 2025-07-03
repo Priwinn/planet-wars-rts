@@ -91,5 +91,5 @@ kotlin {
 tasks.register<JavaExec>("runEvaluation") {
     mainClass.set("games.planetwars.runners.EvaluateAgentKt")
     classpath = sourceSets["main"].runtimeClasspath
-    args = listOf(project.findProperty("args")?.toString() ?: "9003")
+    args = listOf(project.findProperty("args")?.toString() ?: "49875")
 }

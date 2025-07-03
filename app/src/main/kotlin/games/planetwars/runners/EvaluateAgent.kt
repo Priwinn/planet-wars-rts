@@ -8,6 +8,27 @@ import games.planetwars.core.GameParams
 import json_rmi.SimpleAgent
 import java.io.File
 
+
+fun waitForAgentType(
+    remoteAgent: RemoteAgent,
+    maxRetries: Int = 10,
+    initialDelayMs: Double = 200.0,
+): String {
+    var delay = initialDelayMs
+    repeat(maxRetries) { attempt ->
+        try {
+            val agentName = remoteAgent.getAgentType()
+            println("✅ Connected to remote agent: $agentName")
+            return agentName
+        } catch (e: Exception) {
+            println("⏳ Attempt ${attempt + 1} failed: ${e.message}")
+            Thread.sleep(delay.toLong())
+            delay = (delay * 1.5).coerceAtMost(2000.0)  // exponential backoff up to 2s
+        }
+    }
+    throw RuntimeException("❌ Failed to connect to remote agent after $maxRetries attempts.")
+}
+
 fun main(args: Array<String>) {
     if (args.isEmpty()) {
         println("❌ Please provide the port number for the remote agent.")
@@ -20,12 +41,19 @@ fun main(args: Array<String>) {
         return
     }
 
+    val timeout = 40L // milliseconds before each remote call times out - adjust as needed
+
+    // number of games to play between each pair of agents -
+    // higher values give more accurate results, at the cost of time
+    val gamesPerPair = 5
+
     val gameParams = GameParams(numPlanets = 20, maxTicks = 2000)
     val baselineAgents = SamplePlayerLists().getRandomTrio()
+//    baselineAgents.clear()
     baselineAgents.add(GreedyHeuristicAgent())
     baselineAgents.add(SimpleEvoAgent())
     val remoteAgent = RemoteAgent("<unused - name retrieved from remoteAgent>", port = remotePort)
-    val testAgentName = remoteAgent.getAgentType()
+    val testAgentName = waitForAgentType(remoteAgent)
     val results = mutableListOf<Triple<String, Double, Int>>()
 
     for (baseline in baselineAgents) {
@@ -33,9 +61,9 @@ fun main(args: Array<String>) {
         val league = RoundRobinLeague(
             agents = listOf(remoteAgent, baseline),
             gameParams = gameParams,
-            gamesPerPair = 5,
+            gamesPerPair = gamesPerPair,
             runRemoteAgents = true,
-            timeout = 10,
+            timeout = timeout,
         )
 
         val scores = league.runRoundRobin()

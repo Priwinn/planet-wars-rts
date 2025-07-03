@@ -20,25 +20,16 @@ From: gradle:8.4.0-jdk20
     find app/src/main/kotlin -name '*.kt' | tee /tmp/kotlin_files.txt
     echo "+++ Found $(wc -l < /tmp/kotlin_files.txt) Kotlin files +++"
 
-    echo "+++ POST: Running Gradle :app:compileKotlin task (no daemon, in-process, info logging) +++"
+    echo "+++ POST: Running Gradle :app:shadowJar task (fat JAR build) +++"
     gradle --no-daemon \
            --info \
            -Dorg.gradle.workers.max=1 \
            -Dkotlin.compiler.execution.strategy="in-process" \
-           :app:compileKotlin || (echo "Kotlin compile failed!" && exit 1)
+           :app:shadowJar || (echo "Shadow JAR build failed!" && exit 1)
 
-    echo "+++ POST: Kotlin compile completed at $(date) +++"
-
-    echo "+++ POST: Running :app:jar task +++"
-    gradle --no-daemon \
-           --info \
-           -Dorg.gradle.workers.max=1 \
-           -Dkotlin.compiler.execution.strategy="in-process" \
-           :app:jar || (echo "Jar task failed!" && exit 1)
-
-    echo "+++ POST: Copying JAR to /app +++"
+    echo "+++ POST: Copying fat JAR to /app +++"
     mkdir -p /app
-    cp /build/app/build/libs/*.jar /app/app.jar || (echo "JAR not found!" && exit 1)
+    cp /build/app/build/libs/client-server*.jar /app/app.jar || (echo "Fat JAR not found!" && exit 1)
 
     echo "+++ POST: Build complete at $(date) +++"
 
