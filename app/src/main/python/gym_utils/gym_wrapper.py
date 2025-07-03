@@ -341,7 +341,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
     def _calculate_reward(self, game_state: Dict[str, Any]) -> float:
         """Calculate reward based on game state for the controlled player"""
         # current_score = self._calculate_normalized_score_delta(game_state)
-        current_score = self._calculate_growth_rate(game_state)
+        current_score = self._calculate_growth_rate(game_state)/ self.game_params['maxTicks']
         
         # Reward is the change in score since last step
         # reward = current_score - self.previous_score

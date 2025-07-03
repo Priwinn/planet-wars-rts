@@ -96,7 +96,7 @@ class Args:
     """Filled on run time, mlp uses flattened observation, gnn uses graph observation"""
     
     # Opponent configuration
-    opponent_type: str = "greedy"  # "random", "greedy", or "do_nothing"
+    opponent_type: str = "random"  # "random", "greedy", or "do_nothing"
     """type of opponent to train against"""
 
     # to be filled in runtime
