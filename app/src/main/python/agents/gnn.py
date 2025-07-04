@@ -313,8 +313,8 @@ class PlanetWarsAgentGNN(nn.Module):
             target_node_logits = self.target_actor(node_features).squeeze(-1)  # [num_nodes]
             
             # Get ship ratio distribution
-            # ratio_mean = torch.sigmoid(self.ratio_actor_mean(global_features))
-            ratio_mean = self.ratio_actor_mean(global_features)
+            ratio_mean = torch.sigmoid(self.ratio_actor_mean(global_features))
+            # ratio_mean = self.ratio_actor_mean(global_features)
 
             source_logits = source_node_logits.unsqueeze(0)  # [1, num_planets]
             target_logits = target_node_logits.unsqueeze(0)  # [1, num_planets]
