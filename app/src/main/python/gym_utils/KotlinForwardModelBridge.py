@@ -2,9 +2,11 @@ import jpype
 import jpype.imports
 from jpype.types import *
 import numpy as np
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple, Optional, Union
 import os
 import atexit
+
+from torch import Tensor
 from core.game_state import Player, Action
 
 

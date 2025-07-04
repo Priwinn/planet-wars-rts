@@ -7,6 +7,7 @@ import time
 import torch
 from agents.baseline_policies import RandomPolicy, GreedyPolicy
 
+from gym_utils.self_play import SelfPlayBase
 from gym_utils.KotlinForwardModelBridge import KotlinForwardModelBridge
 from torch_geometric.data import Data
 from core.game_state import Player, Action
@@ -20,6 +21,22 @@ def owner_one_hot_encoding(owner: torch.Tensor, player_id: int) -> torch.Tensor:
     if player_id == 2:
         one_hot = one_hot[..., [0, 2, 1]]
     return one_hot
+
+def tensor_to_action(tensor: torch.Tensor, player_id: Player) -> Action:
+    """Convert a tensor to an Action object"""
+    if tensor.shape[0] != 3:
+        raise ValueError("Tensor must have shape (3,) for Action conversion")
+    
+    source_planet = int(tensor[0])
+    target_planet = int(tensor[1])
+    num_ships = float(tensor[2])
+    
+    return Action(
+        player_id=player_id,
+        source_planet_id=source_planet,
+        destination_planet_id=target_planet,
+        num_ships=num_ships
+    )
 
 class PlanetWarsForwardModelEnv(gym.Env):
     """
@@ -36,7 +53,8 @@ class PlanetWarsForwardModelEnv(gym.Env):
         opponent_player: Player = Player.Player2,   # Opponent player
         max_ticks: int = 500,
         game_params: Optional[Dict[str, Any]] = None,
-        opponent_policy: Optional[callable] = None  # Function that takes game_state and returns Action
+        opponent_policy: Optional[callable] = None,  # Function that takes game_state and returns Action
+        self_play: Optional[SelfPlayBase] = None  # Function for self-play, if needed
     ):
         super().__init__()
         
@@ -48,9 +66,10 @@ class PlanetWarsForwardModelEnv(gym.Env):
         self.opponent_player = opponent_player
         self.max_ticks = max_ticks
         self.opponent_policy = opponent_policy or RandomPolicy(game_params, opponent_player)
+        self.self_play = self_play
         self.previous_score = 0.0
         self.edge_index = torch.Tensor([[i, j] for i in range(game_params['numPlanets']) for j in range(game_params['numPlanets']) if i != j]).long().permute(1, 0)
-
+        
         self.game_params = game_params or {
             'maxTicks': 500,
             'numPlanets': 10,
@@ -106,6 +125,8 @@ class PlanetWarsForwardModelEnv(gym.Env):
         initial_state = self.kotlin_bridge.get_game_state()
         obs = self._get_observation()
         self.previous_score = self._calculate_normalized_score_delta(initial_state)
+        if self.self_play:
+            self.opponent_policy = self.self_play.get_opponent()
         return obs, {
             'tick': initial_state['tick'],
             'leader': initial_state['leader'],
@@ -121,9 +142,16 @@ class PlanetWarsForwardModelEnv(gym.Env):
         controlled_action = self._convert_gym_action_to_game_action(action)
         
         # Get opponent action
-        current_state = self.kotlin_bridge.get_game_state()
-        opponent_action = self.opponent_policy(current_state)
         
+        if self.self_play:
+            device = next(self.opponent_policy.parameters()).device  # Same device as opponent, assume it is a PyTorch model
+            opponent_action = self.opponent_policy.get_action(self._get_observation().to(device=device))
+            opponent_action = tensor_to_action(opponent_action, self.opponent_player)
+        
+        else:
+            current_state = self.kotlin_bridge.get_game_state()
+            opponent_action = self.opponent_policy(current_state)
+
         # Create actions dict
         actions = {}
         actions[self.controlled_player] = controlled_action

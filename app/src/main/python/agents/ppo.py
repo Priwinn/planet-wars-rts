@@ -24,6 +24,7 @@ from core.game_state import Player
 from agents.mlp import PlanetWarsAgentMLP
 from agents.gnn import PlanetWarsAgentGNN, GraphInstanceToPyG
 from agents.baseline_policies import GreedyPolicy,RandomPolicy
+from gym_utils.self_play import NaiveSelfPlay
 
 
 
@@ -98,6 +99,7 @@ class Args:
     # Opponent configuration
     opponent_type: str = "random"  # "random", "greedy", or "do_nothing"
     """type of opponent to train against"""
+    self_play: str = None 
 
     # to be filled in runtime
     batch_size: int = 0
@@ -112,9 +114,14 @@ def make_env(env_id, idx, capture_video, run_name, device, args):
     def thunk():        
         # Configure opponent policy
         if args.opponent_type == "random":
-            opponent_policy = None  # Will use default random policy
+            opponent_policy = "random"  # Will use default random policy
         elif args.opponent_type == "greedy":
             opponent_policy = "greedy"  # Will be set after env creation
+        elif args.opponent_type == None:
+            opponent_policy = None
+        
+        if args.self_play == "naive":
+            self_play = NaiveSelfPlay(player_id=2)
 
         if env_id == "PlanetWarsForwardModel":
             env = PlanetWarsForwardModelEnv(
@@ -142,12 +149,14 @@ def make_env(env_id, idx, capture_video, run_name, device, args):
                     'width': 640,
                     'height': 480
                 },
-                opponent_policy=opponent_policy
+                opponent_policy=opponent_policy,
+                self_play= self_play if args.self_play == "naive" else None
             )
         if opponent_policy == "greedy":
             env.set_opponent_policy(GreedyPolicy(game_params=env.game_params, player=Player.Player2))
-        
-        
+        elif opponent_policy == "random":
+            env.set_opponent_policy(RandomPolicy(game_params=env.game_params, player=Player.Player2))
+
         env = PlanetWarsActionWrapper(env, args.num_planets, args.use_adjacency_matrix, args.flatten_observation, device, node_feature_dim=args.node_feature_dim)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         return env
@@ -301,6 +310,7 @@ if __name__ == "__main__":
     next_done = torch.zeros(args.num_envs).to(device)
     curriculum_step = 0
     lesson_number = 0
+    lesson_episode_count = 0
 
     # Track performance metrics
     episode_rewards = []
@@ -355,6 +365,7 @@ if __name__ == "__main__":
                         episode_lengths.append(episode_length)
                         win = reward[i] == 1.0 
                         win_rate.append(1.0 if win else 0.0)
+                        lesson_episode_count += 1
 
                         print(f"global_step={global_step}, episodic_return={episode_reward:.3f}, length={episode_length}, win={win}")
                         writer.add_scalar("charts/episodic_return", episode_reward, global_step)
@@ -364,16 +375,38 @@ if __name__ == "__main__":
                         recent_win_rate = np.mean(win_rate[-50:]) if len(win_rate) >= 50 else np.mean(win_rate) if win_rate else 0.0
                         writer.add_scalar("charts/win_rate", recent_win_rate, global_step)
                          # Reset curriculum step if win rate is good and move to next curriculum step
-                        if recent_win_rate >= 0.9 and len(win_rate) >= 50 and args.opponent_type == "random":
+                        if recent_win_rate >= 0.9 and lesson_episode_count >= 50 and args.opponent_type == "random":
                             curriculum_step = 0
+                            lesson_episode_count = 0
                             args.opponent_type = "greedy"  # Switch to greedy opponent
                             lesson_number += 1
-                            print(f"Curriculum step {curriculum_step} completed, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
+                            print(f"Lesson completed in {curriculum_step} steps, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
                             envs.close()
                             envs = gym.vector.SyncVectorEnv(
                                 [make_env(args.env_id, i, args.capture_video, run_name, device, args) for i in range(args.num_envs)],
                             )
-
+                        if (recent_win_rate >= 0.7 and lesson_episode_count >= 50 and args.opponent_type == "greedy"):
+                            curriculum_step = 0
+                            lesson_episode_count = 0
+                            args.opponent_type = None
+                            args.self_play = "naive"  # Switch to self-play
+                            lesson_number += 1
+                            print(f"Lesson completed in {curriculum_step} steps, switching to self-play with self-play type '{args.self_play}'.")
+                            envs.close()
+                            envs = gym.vector.SyncVectorEnv(
+                                [make_env(args.env_id, i, args.capture_video, run_name, device, args) for i in range(args.num_envs)],
+                            )
+                            for env in envs.envs:
+                                env.env.env.self_play.add_opponent(agent.copy_as_opponent())  # Add a copy of the agent as opponent in self-play
+                            envs.reset()
+                        if (recent_win_rate >= 0.7 and lesson_episode_count >= 50 and args.self_play == "naive"):
+                            curriculum_step = 0
+                            lesson_episode_count = 0
+                            lesson_number += 1
+                            print(f"Lesson completed in {curriculum_step} steps, updating opponent policy in self-play.")
+                            for env in envs.envs:
+                                env.env.env.self_play.add_opponent(agent.copy_as_opponent())  # Update opponent policy in self-play
+                            envs.reset()
 
         # Bootstrap value if not done
         with torch.no_grad():

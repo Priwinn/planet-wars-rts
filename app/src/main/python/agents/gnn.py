@@ -347,6 +347,17 @@ class PlanetWarsAgentGNN(nn.Module):
             ], dim=-1)
 
         return action
+    def copy(self):
+        """Create a copy of the agent"""
+        new_agent = PlanetWarsAgentGNN(self.args, self.player_id)
+        new_agent.load_state_dict(self.state_dict())
+        return new_agent
+    def copy_as_opponent(self):
+        """Create a copy of the agent as an opponent"""
+        new_agent = PlanetWarsAgentGNN(self.args, self.player_id)
+        new_agent.load_state_dict(self.state_dict())
+        new_agent.player_id = 3 - self.player_id
+        return new_agent
 
 class MaskedCategorical(Categorical):
     """Categorical distribution with action masking"""
