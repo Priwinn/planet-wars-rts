@@ -290,7 +290,23 @@ class PlanetWarsAgentGNN(nn.Module):
 
     def get_action(self, data):
         with torch.no_grad():
+            # Get masks from node features (owner is first feature)
+            num_planets = data.x.size(0)
+            planet_owners = data.x[:, 0].unsqueeze(0)  # [1, num_planets]
+            transporter_owners_per_edge = data.edge_attr[:, 0].view(num_planets,num_planets-1).unsqueeze(0) # [1, num_planets, num_planets-1]
+            transporter_owners = torch.sum(transporter_owners_per_edge, dim=2) > 0  # [1, num_planets]
+
+
+            #one-hot encode planet owners and transporter owners
+            data.x = torch.cat((owner_one_hot_encoding(planet_owners.view(-1), self.player_id),
+                            data.x[:, 1:]),
+                            dim=-1)
+            data.edge_attr = torch.cat((owner_one_hot_encoding(transporter_owners_per_edge.view(-1), self.player_id),
+                                    data.edge_attr[:, 1:]), dim=-1)
+
             node_features, global_features = self.forward_gnn(data.x, data.edge_index, data.edge_attr)
+            # _, v_global_features = self.forward_value_gnn(data.x, data.edge_index, data.edge_attr)
+
 
             # Get per-node logits for source and target selection
             source_node_logits = self.source_actor(node_features).squeeze(-1)  # [num_nodes]
@@ -299,20 +315,12 @@ class PlanetWarsAgentGNN(nn.Module):
             # Get ship ratio distribution
             # ratio_mean = torch.sigmoid(self.ratio_actor_mean(global_features))
             ratio_mean = self.ratio_actor_mean(global_features)
-            
 
-                
             source_logits = source_node_logits.unsqueeze(0)  # [1, num_planets]
             target_logits = target_node_logits.unsqueeze(0)  # [1, num_planets]
             
-            # Get masks from node features (owner is first feature)
-            planet_owners = data.x[:, 0].unsqueeze(0)  # [1, num_planets]
-            transporter_owners = data.edge_attr.view(1,num_planets,num_planets-1,3) [:,:, 0]
-            transporter_owners = torch.sum(transporter_owners, dim=2) > 0  
-
-            
             # Create masks
-            source_mask = torch.logical_and(planet_owners == 1, transporter_owners == 0)
+            source_mask = torch.logical_and(planet_owners == self.player_id, transporter_owners == 0)
             
             # Create masked distributions for source selection
             source_probs = MaskedCategorical(logits=source_logits, mask=source_mask)
@@ -321,11 +329,10 @@ class PlanetWarsAgentGNN(nn.Module):
             source_action = source_probs.probs.argmax(dim=-1)  # [1]
             
             # Create target mask
-            target_mask = (planet_owners == 2).float()  #Currently targetting only opponent planets yields better results
+            target_mask = (planet_owners == 3-self.player_id).float()  #Currently targetting only opponent planets yields better results
             
             # Prevent sending to self
             target_mask[0, source_action[0]] = 0
-
             
             target_probs = MaskedCategorical(logits=target_logits, mask=target_mask)
             target_action = target_probs.probs.argmax(dim=-1)  # [1]
@@ -338,7 +345,6 @@ class PlanetWarsAgentGNN(nn.Module):
                 target_action.float(),
                 ratio_action.squeeze(-1)
             ], dim=-1)
-  
 
         return action
 

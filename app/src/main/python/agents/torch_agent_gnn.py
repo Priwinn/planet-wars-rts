@@ -130,6 +130,11 @@ class TorchAgentGNN(PlanetWarsPlayer):
         else:
             raise ValueError(f"Unknown player: {player}")
         
+    def prepare_to_play_as(self, player: Player, params: GameParams, opponent: str | None = ...) -> str:
+        self.model.player_id = 1 if player == Player.Player1 else 2
+        self.player_id = self.model.player_id
+        return super().prepare_to_play_as(player, params, opponent)
+        
     
 
 
