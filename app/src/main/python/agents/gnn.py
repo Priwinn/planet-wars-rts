@@ -45,12 +45,14 @@ class PlanetWarsAgentGNN(nn.Module):
         
         # Graph Attention Network layers (edge features)
         self.v_conv1 = GATv2Conv(self.node_feature_dim, 64, heads=4, concat=True, edge_dim=5)
-        self.v_conv2 = GATv2Conv(64*4, 128, heads=4, concat=True, edge_dim=5)
-        self.v_conv3 = GATv2Conv(128*4, 64, heads=1, concat=False, edge_dim=5)
+        self.v_conv2 = GATv2Conv(64*4, 64, heads=1, concat=False, edge_dim=5)
+        # self.v_conv2 = GATv2Conv(64*4, 128, heads=4, concat=True, edge_dim=5)
+        # self.v_conv3 = GATv2Conv(128*4, 64, heads=1, concat=False, edge_dim=5)
 
         self.a_conv1 = GATv2Conv(self.node_feature_dim, 64, heads=4, concat=True, edge_dim=5)
-        self.a_conv2 = GATv2Conv(64*4, 128, heads=4, concat=True, edge_dim=5)
-        self.a_conv3 = GATv2Conv(128*4, 64, heads=1, concat=False, edge_dim=5)
+        self.a_conv2 = GATv2Conv(64*4, 64, heads=1, concat=False, edge_dim=5)
+        # self.a_conv2 = GATv2Conv(64*4, 128, heads=4, concat=True, edge_dim=5)
+        # self.a_conv3 = GATv2Conv(128*4, 64, heads=1, concat=False, edge_dim=5)
 
         # Global graph feature extraction
         self.global_pool = global_mean_pool
@@ -101,9 +103,11 @@ class PlanetWarsAgentGNN(nn.Module):
     def forward_gnn(self, x, edge_index, edge_attr, batch=None):
         """Forward pass through GNN layers"""
         # GNN forward pass
-        h = F.relu(self.a_conv1(x, edge_index, edge_attr))
-        h = F.relu(self.a_conv2(h, edge_index, edge_attr))
-        h = self.a_conv3(h, edge_index, edge_attr)
+        h = self.a_conv1(x, edge_index, edge_attr)
+        h = F.relu(h)
+        h = self.a_conv2(h, edge_index, edge_attr)
+        # h = F.relu(h)
+        # h = self.a_conv3(h, edge_index, edge_attr)
 
         
 
@@ -125,9 +129,11 @@ class PlanetWarsAgentGNN(nn.Module):
     def forward_value_gnn(self, x, edge_index, edge_attr, batch=None):
         """Forward pass through GNN layers for value estimation"""
         # GNN forward pass
-        h = F.relu(self.v_conv1(x, edge_index, edge_attr))
-        h = F.relu(self.v_conv2(h, edge_index, edge_attr))
-        h = self.v_conv3(h, edge_index, edge_attr)
+        h = self.v_conv1(x, edge_index, edge_attr)
+        h = F.relu(h)
+        h = self.v_conv2(h, edge_index, edge_attr)
+        # h = F.relu(h)
+        # h = self.v_conv3(h, edge_index, edge_attr)
 
         # Global features
         if batch is None:

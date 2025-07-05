@@ -293,7 +293,7 @@ if __name__ == "__main__":
                              ) 
                              for _ in range(args.num_envs)] for _ in range(args.num_steps)]
 
-    actions = torch.zeros((args.num_steps, args.num_envs, 3)).to(device)  # 3D action space
+    actions = torch.zeros((args.num_steps, args.num_envs, 3)).to(device) 
     logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
@@ -376,36 +376,38 @@ if __name__ == "__main__":
                         writer.add_scalar("charts/win_rate", recent_win_rate, global_step)
                          # Reset curriculum step if win rate is good and move to next curriculum step
                         if recent_win_rate >= 0.9 and lesson_episode_count >= 50 and args.opponent_type == "random":
+                            args.opponent_type = "greedy"  # Switch to greedy opponent
+                            print(f"Lesson completed in {curriculum_step} steps, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
                             curriculum_step = 0
                             lesson_episode_count = 0
-                            args.opponent_type = "greedy"  # Switch to greedy opponent
                             lesson_number += 1
-                            print(f"Lesson completed in {curriculum_step} steps, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
                             envs.close()
                             envs = gym.vector.SyncVectorEnv(
                                 [make_env(args.env_id, i, args.capture_video, run_name, device, args) for i in range(args.num_envs)],
                             )
                         if (recent_win_rate >= 0.7 and lesson_episode_count >= 50 and args.opponent_type == "greedy"):
+                            print(f"Lesson completed in {curriculum_step} steps, switching to self-play with self-play type '{args.self_play}'.")
                             curriculum_step = 0
                             lesson_episode_count = 0
                             args.opponent_type = None
                             args.self_play = "naive"  # Switch to self-play
                             lesson_number += 1
-                            print(f"Lesson completed in {curriculum_step} steps, switching to self-play with self-play type '{args.self_play}'.")
+                            
                             envs.close()
                             envs = gym.vector.SyncVectorEnv(
                                 [make_env(args.env_id, i, args.capture_video, run_name, device, args) for i in range(args.num_envs)],
                             )
                             for env in envs.envs:
-                                env.env.env.self_play.add_opponent(agent.copy_as_opponent())  # Add a copy of the agent as opponent in self-play
+                                env.env.env.self_play.add_opponent(agent.copy_as_opponent().to('cpu'))  # Add a copy of the agent as opponent in self-play
                             envs.reset()
                         if (recent_win_rate >= 0.7 and lesson_episode_count >= 50 and args.self_play == "naive"):
+                            print(f"Lesson completed in {curriculum_step} steps, updating opponent policy in self-play.")
                             curriculum_step = 0
                             lesson_episode_count = 0
                             lesson_number += 1
-                            print(f"Lesson completed in {curriculum_step} steps, updating opponent policy in self-play.")
+                            
                             for env in envs.envs:
-                                env.env.env.self_play.add_opponent(agent.copy_as_opponent())  # Update opponent policy in self-play
+                                env.env.env.self_play.add_opponent(agent.copy_as_opponent().to('cpu'))  # Update opponent policy in self-play
                             envs.reset()
 
         # Bootstrap value if not done
@@ -512,6 +514,12 @@ if __name__ == "__main__":
         
         writer.add_scalar("charts/SPS", steps_per_second, global_step)
         writer.add_scalar("charts/mean_reward", mean_reward, global_step)
+
+        # Action statistics
+        ratio_mean = (b_actions[:, 2].mean() if b_actions.shape[1] > 2 else 0.0)
+        ratio_std = (b_actions[:, 2].std() if b_actions.shape[1] > 2 else 0.0)
+        writer.add_scalar("charts/mean_action_ratio", ratio_mean, global_step)
+        writer.add_scalar("charts/std_action_ratio", ratio_std, global_step)
         
         # Print progress
         if iteration % 10 == 0:
