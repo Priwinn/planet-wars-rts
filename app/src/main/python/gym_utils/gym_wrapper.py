@@ -436,16 +436,12 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
         game_state = self.kotlin_bridge.get_game_state()
         planets = game_state['planets']
         node_features = torch.Tensor(np.stack([self._get_planet_features(p) for p in planets], axis=0))
-        # One-hot encode owners
-        # owners = self._owner_one_hot_encoding(node_features[:, 0].long())
-        # node_features = torch.cat((owners, node_features[:, 1:]), dim=1)
+
         edge_features = self.edge_attr.detach().clone()
         planets_with_transporters = [p for p in planets if p.get('transporter') is not None]
         for p in planets_with_transporters:
             edge_features[self._get_edge_index(p['id'], p['transporter']['destinationIndex'])] = self._get_transporter_features(p)
-        #One-hot encode transporter owner
-        # transporter_owners = self._owner_one_hot_encoding(edge_features[:, 0].long())
-        # edge_features = torch.cat((transporter_owners, edge_features[:, 1:]), dim=1)
+
         return Data(
             x=node_features,
             edge_index=self.edge_index,
@@ -459,8 +455,8 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
         """Extract features from a single planet for GNN"""
         features = np.asarray([
             planet['owner'],  # Owner ID
-            planet['numShips'],  # Number of ships
-            planet['growthRate'],  # Growth rate
+            planet['numShips']/10,  # Number of ships
+            planet['growthRate']*10,  # Growth rate
         ])
         return features
     def _get_transporter_features(self, planet) -> torch.Tensor:
@@ -468,13 +464,13 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
         if planet['transporter'] is not None:
             target_planet = self._get_planet_by_id(planet['transporter']['destinationIndex'])
             distance = np.sqrt((target_planet['x'] - planet['transporter']['x'])**2 + (target_planet['y'] - planet['transporter']['y'])**2)
-            weight = self.game_params['transporterSpeed'] / (distance ** self.distance_power + 1e-8)
-            return torch.FloatTensor([planet['transporter']['owner'], planet['transporter']['numShips'], weight])
+            weight = 10*self.game_params['transporterSpeed'] / (distance ** self.distance_power + 1e-8)
+            return torch.FloatTensor([planet['transporter']['owner'], planet['transporter']['numShips']/10, weight])
         else:
             raise ValueError("Planet does not have a transporter")
     def _get_default_edge_features(self,i,j) -> np.ndarray:
         """Get default edge features for planets without transporters in use"""
-        weight = self.game_params['transporterSpeed'] / (np.sqrt((self._get_planet_by_id(i)['x'] - self._get_planet_by_id(j)['x']) ** 2 + (self._get_planet_by_id(i)['y'] - self._get_planet_by_id(j)['y']) ** 2) ** self.distance_power + 1e-8)
+        weight = 10 * self.game_params['transporterSpeed'] / (np.sqrt((self._get_planet_by_id(i)['x'] - self._get_planet_by_id(j)['x']) ** 2 + (self._get_planet_by_id(i)['y'] - self._get_planet_by_id(j)['y']) ** 2) ** self.distance_power + 1e-8)
         return np.array([0.0,0.0, weight], dtype=np.float32)
     def _get_planet_by_id(self, planet_id: int) -> Dict[str, Any]:
         """Get planet data by ID"""

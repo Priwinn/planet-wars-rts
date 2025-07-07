@@ -82,8 +82,8 @@ class TorchAgentGNN(PlanetWarsPlayer):
         """Extract features from a single planet for GNN"""
         features = np.asarray([
             0 if planet.owner == Player.Neutral else 1 if planet.owner == Player.Player1 else 2,  # Owner ID
-            planet.n_ships,  # Number of ships
-            planet.growth_rate,  # Growth rate
+            planet.n_ships/10,  # Number of ships
+            10*planet.growth_rate,  # Growth rate
         ])
         return features
 
@@ -92,16 +92,16 @@ class TorchAgentGNN(PlanetWarsPlayer):
         if planet.transporter is not None:
             target_planet = self._get_planet_by_id(planet.transporter.destination_index, game_state=game_state)
             distance = np.sqrt((target_planet.position.x - planet.transporter.s.x)**2 + (target_planet.position.y - planet.transporter.s.y)**2)
-            weight = self.game_params['transporterSpeed'] / (distance + 1e-8)
+            weight = 10*self.game_params['transporterSpeed'] / (distance + 1e-8)
             return torch.FloatTensor([self.player_to_int(planet.transporter.owner),
-                                       planet.transporter.n_ships,
+                                       planet.transporter.n_ships/10,
                                        weight])
         else:
             raise ValueError("Planet does not have a transporter")
 
     def _get_default_edge_features(self,i,j,game_state: GameState) -> np.ndarray:
         """Get default edge features for planets without transporters in use"""
-        weight = self.game_params['transporterSpeed'] / (
+        weight = 10*self.game_params['transporterSpeed'] / (
             np.sqrt((self._get_planet_by_id(i, game_state=game_state).position.x - self._get_planet_by_id(j, game_state=game_state).position.x) ** 2 + (self._get_planet_by_id(i, game_state=game_state).position.y - self._get_planet_by_id(j, game_state=game_state).position.y) ** 2) + 1e-8)
         return np.array([0.0,0.0, weight], dtype=np.float32)
     def _get_planet_by_id(self, planet_id: int, game_state: GameState) -> Dict[str, Any]:

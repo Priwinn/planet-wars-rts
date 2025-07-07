@@ -386,11 +386,11 @@ if __name__ == "__main__":
                                 [make_env(args.env_id, i, args.capture_video, run_name, device, args) for i in range(args.num_envs)],
                             )
                         if (recent_win_rate >= 0.7 and lesson_episode_count >= 50 and args.opponent_type == "greedy"):
+                            args.self_play = "naive"  # Switch to self-play
                             print(f"Lesson completed in {curriculum_step} steps, switching to self-play with self-play type '{args.self_play}'.")
                             curriculum_step = 0
                             lesson_episode_count = 0
                             args.opponent_type = None
-                            args.self_play = "naive"  # Switch to self-play
                             lesson_number += 1
                             
                             envs.close()
@@ -518,9 +518,17 @@ if __name__ == "__main__":
         # Action statistics
         ratio_mean = (b_actions[:, 2].mean() if b_actions.shape[1] > 2 else 0.0)
         ratio_std = (b_actions[:, 2].std() if b_actions.shape[1] > 2 else 0.0)
-        writer.add_scalar("charts/mean_action_ratio", ratio_mean, global_step)
-        writer.add_scalar("charts/std_action_ratio", ratio_std, global_step)
-        
+        source_counts = torch.bincount(b_actions[:, 0].long(), minlength=args.num_planets)
+        target_counts = torch.bincount(b_actions[:, 1].long(), minlength=args.num_planets)
+        source_freq = source_counts.float() / args.batch_size
+        target_freq = target_counts.float() / args.batch_size
+
+        writer.add_scalar("action_stats/mean_action_ratio", ratio_mean, global_step)
+        writer.add_scalar("action_stats/std_action_ratio", ratio_std, global_step)
+        for i in range(args.num_planets):
+            writer.add_scalar(f"action_stats/source_planet_{i}_freq", source_freq[i].item(), global_step)
+            writer.add_scalar(f"action_stats/target_planet_{i}_freq", target_freq[i].item(), global_step)
+
         # Print progress
         if iteration % 10 == 0:
             wr = np.mean(win_rate[-50:]) if len(win_rate) >= 50 else np.mean(win_rate) if win_rate else 0.0

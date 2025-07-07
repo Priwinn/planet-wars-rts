@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal, Categorical
-from torch_geometric.nn import GCNConv, GATConv, global_mean_pool, global_max_pool, GATv2Conv
+from torch_geometric.nn import GCNConv, GATConv, global_mean_pool, global_max_pool, GATv2Conv, ResGatedGraphConv
 from torch_geometric.data import Data, Batch
 from typing import Tuple, Union, List
 from gym_utils.gym_wrapper import owner_one_hot_encoding
@@ -44,15 +44,21 @@ class PlanetWarsAgentGNN(nn.Module):
         # self.conv3 = GCNConv(128, 64)
         
         # Graph Attention Network layers (edge features)
-        self.v_conv1 = GATv2Conv(self.node_feature_dim, 64, heads=4, concat=True, edge_dim=5)
-        self.v_conv2 = GATv2Conv(64*4, 64, heads=1, concat=False, edge_dim=5)
+        # self.v_conv1 = GATv2Conv(self.node_feature_dim, 64, heads=4, concat=True, edge_dim=5)
+        # self.v_conv2 = GATv2Conv(64*4, 64, heads=1, concat=False, edge_dim=5)
         # self.v_conv2 = GATv2Conv(64*4, 128, heads=4, concat=True, edge_dim=5)
         # self.v_conv3 = GATv2Conv(128*4, 64, heads=1, concat=False, edge_dim=5)
 
-        self.a_conv1 = GATv2Conv(self.node_feature_dim, 64, heads=4, concat=True, edge_dim=5)
-        self.a_conv2 = GATv2Conv(64*4, 64, heads=1, concat=False, edge_dim=5)
+        # self.a_conv1 = GATv2Conv(self.node_feature_dim, 64, heads=4, concat=True, edge_dim=5)
+        # self.a_conv2 = GATv2Conv(64*4, 64, heads=1, concat=False, edge_dim=5)
         # self.a_conv2 = GATv2Conv(64*4, 128, heads=4, concat=True, edge_dim=5)
         # self.a_conv3 = GATv2Conv(128*4, 64, heads=1, concat=False, edge_dim=5)
+
+        #Residual Gated Graph Conv layers
+        self.v_conv1 = ResGatedGraphConv(self.node_feature_dim, 64, edge_dim=5)
+        self.v_conv2 = ResGatedGraphConv(64, 64, edge_dim=5)
+        self.a_conv1 = ResGatedGraphConv(self.node_feature_dim, 64, edge_dim=5)
+        self.a_conv2 = ResGatedGraphConv(64, 64, edge_dim=5)
 
         # Global graph feature extraction
         self.global_pool = global_mean_pool
