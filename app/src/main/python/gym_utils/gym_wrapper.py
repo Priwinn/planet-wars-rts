@@ -27,16 +27,20 @@ def tensor_to_action(tensor: torch.Tensor, player_id: Player) -> Action:
     if tensor.shape[0] != 3:
         raise ValueError("Tensor must have shape (3,) for Action conversion")
     
-    source_planet = int(tensor[0])
+    source_planet = int(tensor[0]) 
     target_planet = int(tensor[1])
     num_ships = float(tensor[2])
-    
-    return Action(
-        player_id=player_id,
-        source_planet_id=source_planet,
-        destination_planet_id=target_planet,
+
+    if source_planet == 0:
+        # No-op action
+        return Action.do_nothing()
+    else:
+        return Action(
+            player_id=player_id,
+            source_planet_id=source_planet-1,  # -1 to account for no-op action
+            destination_planet_id=target_planet,
         num_ships=num_ships
-    )
+        )
 
 class PlanetWarsForwardModelEnv(gym.Env):
     """
@@ -190,6 +194,11 @@ class PlanetWarsForwardModelEnv(gym.Env):
         source_planet = int(gym_action[0])
         target_planet = int(gym_action[1])
         ship_ratio = float(gym_action[2][0])
+        if source_planet == 0:
+            # No-op action
+            return Action.do_nothing()
+        else:
+            source_planet -= 1  # -1 to account for no-op action
         
         # Get current game state to check planet ownership and ships
         current_state = self.kotlin_bridge.get_game_state()
@@ -351,7 +360,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
         if total_score == 0:
             return 0.0
         
-        return (controlled_player_score - opponent_score) / self.game_params['maxTicks']
+        return (controlled_player_score - opponent_score) / (self.game_params['maxTicks'] * 100)
     
     def _calculate_growth_rate(self, game_state: Dict[str, Any]) -> float:
         """Calculate growth rate based on game state for the controlled player"""
@@ -365,11 +374,50 @@ class PlanetWarsForwardModelEnv(gym.Env):
                 controlled_growth += planet['growthRate']
         return controlled_growth
     
+    def _calculate_ship_delta(self, game_state: Dict[str, Any]) -> float:
+        """Calculate delta based on ship ownership changes"""
+        planets = game_state['planets']
+        
+        controlled_delta = 0
+        opponent_delta = 0
+        
+        for planet in planets:
+            if planet['owner'] == self.player_int:
+                controlled_delta += planet['numShips'] + planet['growthRate']
+            elif planet['owner'] == self.opponent_int:
+                opponent_delta += planet['numShips'] + planet['growthRate']
+
+        transporters = game_state.get('transporters', [])
+        for transporter in transporters:
+            if transporter['owner'] == self.player_int:
+                controlled_delta += transporter['numShips']
+            elif transporter['owner'] == self.opponent_int:
+                opponent_delta += transporter['numShips']
+
+        return (controlled_delta - opponent_delta)/(self.game_params['maxTicks'])
     
+    def _calculate_growth_delta(self, game_state: Dict[str, Any]) -> float:
+        """Calculate delta based on growth rate changes"""
+        planets = game_state['planets']
+        
+        controlled_growth = 0
+        opponent_growth = 0
+        
+        for planet in planets:
+            if planet['owner'] == self.player_int:
+                controlled_growth += planet['growthRate']
+            elif planet['owner'] == self.opponent_int:
+                opponent_growth += planet['growthRate']
+        
+        return (controlled_growth - opponent_growth)
+
+
     def _calculate_reward(self, game_state: Dict[str, Any]) -> float:
         """Calculate reward based on game state for the controlled player"""
         # current_score = self._calculate_normalized_score_delta(game_state)
-        current_score = self._calculate_growth_rate(game_state)/ self.game_params['maxTicks']
+        # current_score = self._calculate_growth_rate(game_state)/ self.game_params['maxTicks']
+        # current_score = self._calculate_growth_delta(game_state)*0.1
+        current_score = self._calculate_ship_delta(game_state)*0.1
         
         # Reward is the change in score since last step
         # reward = current_score - self.previous_score
@@ -463,14 +511,17 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
         """Calculate edge features between two planets. Weight is normalized by game width/height and transporter speed."""
         if planet['transporter'] is not None:
             target_planet = self._get_planet_by_id(planet['transporter']['destinationIndex'])
-            distance = np.sqrt((target_planet['x'] - planet['transporter']['x'])**2 + (target_planet['y'] - planet['transporter']['y'])**2)
+            distance = np.sqrt((target_planet['x'] - planet['transporter']['x'])**2 + (target_planet['y'] - planet['transporter']['y'])**2) - target_planet['radius']
             weight = 10*self.game_params['transporterSpeed'] / (distance ** self.distance_power + 1e-8)
             return torch.FloatTensor([planet['transporter']['owner'], planet['transporter']['numShips']/10, weight])
         else:
             raise ValueError("Planet does not have a transporter")
     def _get_default_edge_features(self,i,j) -> np.ndarray:
         """Get default edge features for planets without transporters in use"""
-        weight = 10 * self.game_params['transporterSpeed'] / (np.sqrt((self._get_planet_by_id(i)['x'] - self._get_planet_by_id(j)['x']) ** 2 + (self._get_planet_by_id(i)['y'] - self._get_planet_by_id(j)['y']) ** 2) ** self.distance_power + 1e-8)
+        planet_i = self._get_planet_by_id(i)
+        planet_j = self._get_planet_by_id(j)
+        distance = np.sqrt((planet_i['x'] - planet_j['x']) ** 2 + (planet_i['y'] - planet_j['y']) ** 2) - planet_j['radius']
+        weight = 10 * self.game_params['transporterSpeed'] / (distance ** self.distance_power + 1e-8)
         return np.array([0.0,0.0, weight], dtype=np.float32)
     def _get_planet_by_id(self, planet_id: int) -> Dict[str, Any]:
         """Get planet data by ID"""

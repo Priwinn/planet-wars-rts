@@ -97,6 +97,13 @@ class PlanetWarsAgentGNN(nn.Module):
             nn.ReLU(),
             layer_init(nn.Linear(32, 1), std=0.01),  # Per-node logit
         )
+
+        # No-op Policy Head - uses global features
+        self.noop_actor = nn.Sequential(
+            layer_init(nn.Linear(64, 32)),
+            nn.ReLU(),
+            layer_init(nn.Linear(32, 1), std=0.01)
+        )
         
         # Ship ratio (continuous) - uses global features
         self.ratio_actor_mean = nn.Sequential(
@@ -218,18 +225,22 @@ class PlanetWarsAgentGNN(nn.Module):
             source_logits = source_node_logits.view(batch_size, -1)
             target_logits = target_node_logits.view(batch_size, -1)
         
+        # Get no-op action logits
+        noop_logits = self.noop_actor(global_features)  # [batch_size]
+        # Concatenate no-op logits with source and logits
+        source_logits = torch.cat((noop_logits, source_logits), dim=1)  # [batch_size, num_planets + 1]
+
         # Get ship ratio distribution
         ratio_mean = torch.sigmoid(self.ratio_actor_mean(global_features))
         # ratio_mean = self.ratio_actor_mean(global_features)
         ratio_std = torch.clamp(self.ratio_actor_logstd.exp(), min=0.01, max=0.5)
         # ratio_std = torch.exp(self.ratio_actor_logstd)  
         ratio_probs = Normal(ratio_mean, ratio_std)
-        
-
 
         # Create masks
         source_mask = torch.logical_and(planet_owners == 1, transporter_owners == 0) 
-        
+        source_mask = torch.cat((torch.ones(batch_size, 1, dtype=torch.bool, device=source_mask.device), source_mask), dim=1)  # Add no-op mask
+
         # Create masked distributions for source selection
         source_probs = MaskedCategorical(logits=source_logits, mask=source_mask)
         
@@ -241,54 +252,44 @@ class PlanetWarsAgentGNN(nn.Module):
             # target_mask = torch.ones_like(planet_owners, dtype=torch.bool)  # All planets
             # target_mask = (planet_owners != self.player_id).float()  # Not our planets
             # target_mask = (planet_owners != 0).float()  # Not neutrals
-            target_mask = (planet_owners == 2).float()  #Currently targetting only opponent planets yields better results
-            
-            # Prevent sending to self
-            if batch is None:
-                target_mask[0, source_action[0]] = 0
-            else:
-                target_mask[torch.arange(batch_size), source_action] = 0
+            target_mask = (planet_owners == 3-self.player_id).float()  #Currently targetting only opponent planets yields better results
+
+            # Prevent sending to self. Need to deal with the noop action case
+            # if batch is None:
+            #     target_mask[0, source_action[0]] = 0
+            # else:
+            #     target_mask[torch.arange(batch_size), source_action] = 0
             
             target_probs = MaskedCategorical(logits=target_logits, mask=target_mask)
             target_action = target_probs.sample()
             
             # Sample ship ratio
-            ratio_action = torch.clamp(ratio_probs.sample(), 0.0, 0.99)
+            ratio_action = torch.clamp(ratio_probs.sample(), 0.0, 1.0)
             
-            if batch is None:
-                action = torch.stack([
-                    source_action.float(),
-                    target_action.float(),
-                    ratio_action.squeeze(-1)
-                ], dim=-1)
-            else:
-                action = torch.stack([
-                    source_action.float(),
-                    target_action.float(),
-                    ratio_action.squeeze(-1)
-                ], dim=-1)
+            action = torch.stack([
+                source_action.float(),
+                target_action.float(),
+                ratio_action.squeeze(-1)
+            ], dim=-1)
+
         else:
-            # Use provided actions
-            source_action = action[:, 0].long()
-            target_action = action[:, 1].long()
-            ratio_action = action[:, 2]
-            
             # Create target mask for log probability calculation
             target_mask = (planet_owners == 3-self.player_id).float()
 
             # Avoid sending to self
-            if batch is None:
-                target_mask[0, source_action[0]] = 0
-            else:
-                target_mask[torch.arange(batch_size), source_action] = 0
+            # if batch is None:
+            #     target_mask[0, source_action[0]] = 0
+            # else:
+            #     target_mask[torch.arange(batch_size), source_action] = 0
             
             target_probs = MaskedCategorical(logits=target_logits, mask=target_mask)
         
         # Calculate log probabilities
-        source_logprob = source_probs.log_prob(source_action)
-        target_logprob = target_probs.log_prob(target_action)
-        ratio_logprob = ratio_probs.log_prob(ratio_action).squeeze(-1)
-        
+
+        source_logprob = source_probs.log_prob(action[:, 0])  # +1 to account for no-op action
+        target_logprob = target_probs.log_prob(action[:, 1])
+        ratio_logprob = ratio_probs.log_prob(action[:, 2].unsqueeze(-1)).squeeze(-1)
+
         # Combined log probability
         total_logprob = source_logprob + target_logprob + ratio_logprob
         
@@ -350,7 +351,7 @@ class PlanetWarsAgentGNN(nn.Module):
             target_action = target_probs.probs.argmax(dim=-1)  # [1]
             
             # Take mean for test time
-            ratio_action = torch.clamp(ratio_mean, 0.0, 0.99)
+            ratio_action = torch.clamp(ratio_mean, 0.0, 1.0)
             
             action = torch.cat([
                 source_action.float(),

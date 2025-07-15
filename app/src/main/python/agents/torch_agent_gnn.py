@@ -39,12 +39,15 @@ class TorchAgentGNN(PlanetWarsPlayer):
         x = self._get_observation(game_state)# Add batch dimension
 
         action = self.model.get_action(x)
-
-        return Action(
-            player_id=self.player,
-            source_planet_id=action[0],
-            destination_planet_id=action[1],
-            num_ships=action[2] * game_state.planets[action[0].int()].n_ships,
+        if action[0] < 0:
+            # No-op action, return None
+            return Action.do_nothing()
+        else:
+            return Action(
+                player_id=self.player,
+                source_planet_id=action[0],
+                destination_planet_id=action[1],
+                num_ships=action[2] * game_state.planets[action[0].int()].n_ships,
         )
 
     def get_agent_type(self) -> str:
@@ -91,7 +94,7 @@ class TorchAgentGNN(PlanetWarsPlayer):
         """Calculate edge features between two planets. Weight is normalized by game width/height and transporter speed."""
         if planet.transporter is not None:
             target_planet = self._get_planet_by_id(planet.transporter.destination_index, game_state=game_state)
-            distance = np.sqrt((target_planet.position.x - planet.transporter.s.x)**2 + (target_planet.position.y - planet.transporter.s.y)**2)
+            distance = np.sqrt((target_planet.position.x - planet.transporter.s.x)**2 + (target_planet.position.y - planet.transporter.s.y)**2)- target_planet.radius
             weight = 10*self.game_params['transporterSpeed'] / (distance + 1e-8)
             return torch.FloatTensor([self.player_to_int(planet.transporter.owner),
                                        planet.transporter.n_ships/10,
@@ -101,8 +104,10 @@ class TorchAgentGNN(PlanetWarsPlayer):
 
     def _get_default_edge_features(self,i,j,game_state: GameState) -> np.ndarray:
         """Get default edge features for planets without transporters in use"""
-        weight = 10*self.game_params['transporterSpeed'] / (
-            np.sqrt((self._get_planet_by_id(i, game_state=game_state).position.x - self._get_planet_by_id(j, game_state=game_state).position.x) ** 2 + (self._get_planet_by_id(i, game_state=game_state).position.y - self._get_planet_by_id(j, game_state=game_state).position.y) ** 2) + 1e-8)
+        planet_i = self._get_planet_by_id(i, game_state=game_state)
+        planet_j = self._get_planet_by_id(j, game_state=game_state)
+        distance = np.sqrt((planet_i.position.x - planet_j.position.x) ** 2 + (planet_i.position.y - planet_j.position.y) ** 2) - planet_j.radius
+        weight = 10*self.game_params['transporterSpeed'] / (distance + 1e-8)
         return np.array([0.0,0.0, weight], dtype=np.float32)
     def _get_planet_by_id(self, planet_id: int, game_state: GameState) -> Dict[str, Any]:
         """Get planet data by ID"""

@@ -200,8 +200,8 @@ class PlanetWarsActionWrapper(gym.Wrapper):
     
     def step(self, action):
         # Convert flattened action back to tuple format
-        source_planet = int(np.clip(action[0], 0, self.num_planets-1))
-        target_planet = int(np.clip(action[1], 0, self.num_planets-1))
+        source_planet = int(action[0])
+        target_planet = int(action[1])
         ship_ratio = np.clip(action[2], 0.0, 1.0)
         
         tuple_action = (source_planet, target_planet, np.array([ship_ratio]))
@@ -375,7 +375,7 @@ if __name__ == "__main__":
                         recent_win_rate = np.mean(win_rate[-50:]) if len(win_rate) >= 50 else np.mean(win_rate) if win_rate else 0.0
                         writer.add_scalar("charts/win_rate", recent_win_rate, global_step)
                          # Reset curriculum step if win rate is good and move to next curriculum step
-                        if recent_win_rate >= 0.9 and lesson_episode_count >= 50 and args.opponent_type == "random":
+                        if recent_win_rate >= 0.95 and lesson_episode_count >= 50 and args.opponent_type == "random":
                             args.opponent_type = "greedy"  # Switch to greedy opponent
                             print(f"Lesson completed in {curriculum_step} steps, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
                             curriculum_step = 0
@@ -385,7 +385,7 @@ if __name__ == "__main__":
                             envs = gym.vector.SyncVectorEnv(
                                 [make_env(args.env_id, i, args.capture_video, run_name, device, args) for i in range(args.num_envs)],
                             )
-                        if (recent_win_rate >= 0.7 and lesson_episode_count >= 50 and args.opponent_type == "greedy"):
+                        if (recent_win_rate >= 0.95 and lesson_episode_count >= 50 and args.opponent_type == "greedy"):
                             args.self_play = "naive"  # Switch to self-play
                             print(f"Lesson completed in {curriculum_step} steps, switching to self-play with self-play type '{args.self_play}'.")
                             curriculum_step = 0
@@ -400,6 +400,13 @@ if __name__ == "__main__":
                             for env in envs.envs:
                                 env.env.env.self_play.add_opponent(agent.copy_as_opponent().to('cpu'))  # Add a copy of the agent as opponent in self-play
                             envs.reset()
+                            #Save the model after switching to self-play
+                            torch.save({
+                                'iteration': iteration,
+                                'model_state_dict': agent.state_dict(),
+                                'optimizer_state_dict': optimizer.state_dict(),
+                                'args': args,
+                            }, f"models/{run_name}_greedy.pt")
                         if (recent_win_rate >= 0.7 and lesson_episode_count >= 50 and args.self_play == "naive"):
                             print(f"Lesson completed in {curriculum_step} steps, updating opponent policy in self-play.")
                             curriculum_step = 0
@@ -518,15 +525,16 @@ if __name__ == "__main__":
         # Action statistics
         ratio_mean = (b_actions[:, 2].mean() if b_actions.shape[1] > 2 else 0.0)
         ratio_std = (b_actions[:, 2].std() if b_actions.shape[1] > 2 else 0.0)
-        source_counts = torch.bincount(b_actions[:, 0].long(), minlength=args.num_planets)
+        source_counts = torch.bincount(b_actions[:, 0].long(), minlength=args.num_planets+1)
         target_counts = torch.bincount(b_actions[:, 1].long(), minlength=args.num_planets)
-        source_freq = source_counts.float() / args.batch_size
+        source_freq = source_counts.float() / (args.batch_size-source_counts[0].float())  # Exclude no-op action
         target_freq = target_counts.float() / args.batch_size
 
         writer.add_scalar("action_stats/mean_action_ratio", ratio_mean, global_step)
         writer.add_scalar("action_stats/std_action_ratio", ratio_std, global_step)
+        writer.add_scalar("action_stats/source_noop_freq", source_counts[0].float()/args.batch_size, global_step)
         for i in range(args.num_planets):
-            writer.add_scalar(f"action_stats/source_planet_{i}_freq", source_freq[i].item(), global_step)
+            writer.add_scalar(f"action_stats/source_planet_{i}_freq", source_freq[i+1].item(), global_step)
             writer.add_scalar(f"action_stats/target_planet_{i}_freq", target_freq[i].item(), global_step)
 
         # Print progress
@@ -540,7 +548,7 @@ if __name__ == "__main__":
         sys.stdout.flush()
 
         # Save model checkpoint
-        if iteration % 500 == 0:
+        if iteration % 250 == 0:
             torch.save({
                 'iteration': iteration,
                 'model_state_dict': agent.state_dict(),
