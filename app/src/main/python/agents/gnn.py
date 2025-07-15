@@ -180,26 +180,16 @@ class PlanetWarsAgentGNN(nn.Module):
         """Get action probabilities and value"""
         if isinstance(obs, Union[Tuple, List]):
             obs = Batch.from_data_list(obs)
-        data, batch = obs, obs.batch
-
-        if batch is None:
-            # Single graph case
-            batch_size = 1
-            num_planets = data.x.size(0)
-
-            # Get masks from node features (owner is first feature)
-            planet_owners = data.x[:, 0].unsqueeze(0)  # [1, num_planets]
-            transporter_owners_per_edge = data.edge_attr[:, 0].view(num_planets,num_planets-1).unsqueeze(0) # [1, num_planets, num_planets-1]
-            transporter_owners = torch.sum(transporter_owners_per_edge, dim=2) > 0  # [1, num_planets]
         else:
-            # Batch case
-            batch_size = batch.max().item() + 1
-            num_planets = self.args.num_planets
-     
-            # Get planet owners
-            planet_owners = data.x[:, 0].view(batch_size, num_planets)
-            transporter_owners_per_edge = data.edge_attr.view(batch_size, num_planets,num_planets-1,3) [:,:,:, 0]
-            transporter_owners = torch.sum(transporter_owners_per_edge, dim=2) > 0
+            obs = Batch.from_data_list([obs])  # Ensure obs is a Batch object
+        data, batch = obs, obs.batch
+        batch_size = batch.max().item() + 1
+        num_planets = self.args.num_planets
+    
+        # Get planet owners
+        planet_owners = data.x[:, 0].view(batch_size, num_planets)
+        transporter_owners_per_edge = data.edge_attr.view(batch_size, num_planets,num_planets-1,3) [:,:,:, 0]
+        transporter_owners = torch.sum(transporter_owners_per_edge, dim=2) > 0
 
         #one-hot encode planet owners and transporter owners
 
@@ -212,30 +202,14 @@ class PlanetWarsAgentGNN(nn.Module):
         node_features, global_features = self.forward_gnn(data.x, data.edge_index, data.edge_attr, batch)
         _, v_global_features = self.forward_value_gnn(data.x, data.edge_index, data.edge_attr, batch)
 
-        # Get per-node logits for source and target selection
+        # Get per-node logits for source selection
         source_node_logits = self.source_actor(node_features).squeeze(-1)  # [num_nodes]
-        target_node_logits = self.target_actor(node_features).squeeze(-1)  # [num_nodes]
-
-        if batch is None:
-            # Single graph case
-            source_logits = source_node_logits.unsqueeze(0)
-            target_logits = target_node_logits.unsqueeze(0)
-        else:
-            # Batch case
-            source_logits = source_node_logits.view(batch_size, -1)
-            target_logits = target_node_logits.view(batch_size, -1)
+        source_logits = source_node_logits.view(batch_size, -1)
         
         # Get no-op action logits
         noop_logits = self.noop_actor(global_features)  # [batch_size]
         # Concatenate no-op logits with source and logits
         source_logits = torch.cat((noop_logits, source_logits), dim=1)  # [batch_size, num_planets + 1]
-
-        # Get ship ratio distribution
-        ratio_mean = torch.sigmoid(self.ratio_actor_mean(global_features))
-        # ratio_mean = self.ratio_actor_mean(global_features)
-        ratio_std = torch.clamp(self.ratio_actor_logstd.exp(), min=0.01, max=0.5)
-        # ratio_std = torch.exp(self.ratio_actor_logstd)  
-        ratio_probs = Normal(ratio_mean, ratio_std)
 
         # Create masks
         source_mask = torch.logical_and(planet_owners == 1, transporter_owners == 0) 
@@ -244,57 +218,70 @@ class PlanetWarsAgentGNN(nn.Module):
         # Create masked distributions for source selection
         source_probs = MaskedCategorical(logits=source_logits, mask=source_mask)
         
+        #Initialize logprobs and entropy
+        target_logprob = torch.zeros(batch_size, device=source_logits.device)
+        target_entropy = torch.zeros(batch_size, device=source_logits.device)
+        ratio_logprob = torch.zeros(batch_size, device=source_logits.device)
+        ratio_entropy = torch.zeros(batch_size, device=source_logits.device)
+
         if action is None:
             # Sample actions
             source_action = source_probs.sample()
-            
+            target_action = torch.zeros(batch_size, dtype=torch.long, device=source_action.device)
+            ratio_action = torch.zeros(batch_size, 1, dtype=torch.float, device=source_action.device)
+        else:
+            # Use provided action
+            source_action = action[:, 0].long()  # Source action
+            target_action = action[:, 1].long()  # Target action
+            ratio_action = action[:, 2].unsqueeze(-1)  # Ratio action
+
+        #Only sample target and ratio actions if source action is non-null
+        valid_action_idx = source_action != 0
+        if valid_action_idx.any():
+            target_logits = self.target_actor(node_features.view(batch_size,self.args.num_planets, -1)[valid_action_idx]).squeeze(-1)  # [num_nodes]
+
             # Create target mask (opponent planets + neutral, but not source planet)
             # target_mask = torch.ones_like(planet_owners, dtype=torch.bool)  # All planets
             # target_mask = (planet_owners != self.player_id).float()  # Not our planets
             # target_mask = (planet_owners != 0).float()  # Not neutrals
-            target_mask = (planet_owners == 3-self.player_id).float()  #Currently targetting only opponent planets yields better results
+            target_mask = (planet_owners[valid_action_idx] == 3-self.player_id).float()  #Currently targetting only opponent planets yields better results
 
-            # Prevent sending to self. Need to deal with the noop action case
-            # if batch is None:
-            #     target_mask[0, source_action[0]] = 0
-            # else:
-            #     target_mask[torch.arange(batch_size), source_action] = 0
+            # Prevent sending to self
+            target_mask[torch.arange(valid_action_idx.sum()), source_action[valid_action_idx]-1] = 0
             
             target_probs = MaskedCategorical(logits=target_logits, mask=target_mask)
-            target_action = target_probs.sample()
+            # Get ship ratio distribution 
+            # TODO: cat node features for sampled source and target actions
+            ratio_mean = torch.sigmoid(self.ratio_actor_mean(global_features[valid_action_idx]))
+            ratio_std = torch.clamp(self.ratio_actor_logstd.exp(), min=0.01, max=0.5)
+            ratio_probs = Normal(ratio_mean, ratio_std)
             
-            # Sample ship ratio
-            ratio_action = torch.clamp(ratio_probs.sample(), 0.0, 1.0)
-            
-            action = torch.stack([
-                source_action.float(),
-                target_action.float(),
-                ratio_action.squeeze(-1)
-            ], dim=-1)
+            if action is None:
+                valid_target_action = target_probs.sample()
+                ratio_action[valid_action_idx] = torch.clamp(ratio_probs.sample(), 0.0, 1.0)
+                target_action[valid_action_idx] = valid_target_action
+            else:
+                valid_target_action = target_action[valid_action_idx]
 
-        else:
-            # Create target mask for log probability calculation
-            target_mask = (planet_owners == 3-self.player_id).float()
-
-            # Avoid sending to self
-            # if batch is None:
-            #     target_mask[0, source_action[0]] = 0
-            # else:
-            #     target_mask[torch.arange(batch_size), source_action] = 0
+            target_entropy[valid_action_idx] = target_probs.entropy() 
+            target_logprob[valid_action_idx] = target_probs.log_prob(valid_target_action)
+            ratio_logprob[valid_action_idx] = ratio_probs.log_prob(ratio_action[valid_action_idx]).squeeze(-1)
+            ratio_entropy[valid_action_idx] = ratio_probs.entropy().squeeze(-1)
             
-            target_probs = MaskedCategorical(logits=target_logits, mask=target_mask)
-        
+        action = torch.stack([
+            source_action.float(),
+            target_action.float(),
+            ratio_action.squeeze(-1)
+        ], dim=-1)
+    
         # Calculate log probabilities
-
         source_logprob = source_probs.log_prob(action[:, 0])  # +1 to account for no-op action
-        target_logprob = target_probs.log_prob(action[:, 1])
-        ratio_logprob = ratio_probs.log_prob(action[:, 2].unsqueeze(-1)).squeeze(-1)
 
         # Combined log probability
         total_logprob = source_logprob + target_logprob + ratio_logprob
         
         # Combined entropy
-        total_entropy = source_probs.entropy() + target_probs.entropy() + ratio_probs.entropy().squeeze(-1)
+        total_entropy = source_probs.entropy() + target_entropy + ratio_entropy
         
         # Get value
         value = self.critic(v_global_features)
