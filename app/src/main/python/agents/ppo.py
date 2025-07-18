@@ -523,10 +523,11 @@ if __name__ == "__main__":
         writer.add_scalar("charts/mean_reward", mean_reward, global_step)
 
         # Action statistics
-        ratio_mean = (b_actions[:, 2].mean() if b_actions.shape[1] > 2 else 0.0)
-        ratio_std = (b_actions[:, 2].std() if b_actions.shape[1] > 2 else 0.0)
+        is_op = b_actions[:, 0] != 0
+        ratio_mean = (b_actions[is_op, 2].mean() if b_actions.shape[1] > 2 else 0.0)
+        ratio_std = (b_actions[is_op, 2].std() if b_actions.shape[1] > 2 else 0.0)
         source_counts = torch.bincount(b_actions[:, 0].long(), minlength=args.num_planets+1)
-        target_counts = torch.bincount(b_actions[:, 1].long(), minlength=args.num_planets)
+        target_counts = torch.bincount(b_actions[is_op, 1].long(), minlength=args.num_planets)
         source_freq = source_counts.float() / (args.batch_size-source_counts[0].float())  # Exclude no-op action
         target_freq = target_counts.float() / args.batch_size
 

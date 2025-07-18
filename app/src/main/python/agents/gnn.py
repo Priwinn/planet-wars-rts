@@ -107,7 +107,7 @@ class PlanetWarsAgentGNN(nn.Module):
         
         # Ship ratio (continuous) - uses global features
         self.ratio_actor_mean = nn.Sequential(
-            layer_init(nn.Linear(64, 32)),
+            layer_init(nn.Linear(3*64, 32)),
             nn.ReLU(),
             layer_init(nn.Linear(32, 1), std=0.01),
         )
@@ -250,18 +250,23 @@ class PlanetWarsAgentGNN(nn.Module):
             target_mask[torch.arange(valid_action_idx.sum()), source_action[valid_action_idx]-1] = 0
             
             target_probs = MaskedCategorical(logits=target_logits, mask=target_mask)
-            # Get ship ratio distribution 
-            # TODO: cat node features for sampled source and target actions
-            ratio_mean = torch.sigmoid(self.ratio_actor_mean(global_features[valid_action_idx]))
+
+            if action is None:
+                valid_target_action = target_probs.sample()
+                target_action[valid_action_idx] = valid_target_action
+            else:
+                valid_target_action = target_action[valid_action_idx]
+
+            # Get ship ratio distribution, we use sampled source and target node features and global features
+            ratio_input = torch.cat((global_features[valid_action_idx],
+                                    node_features.view(batch_size,self.args.num_planets, -1)[valid_action_idx,source_action[valid_action_idx]-1],
+                                    node_features.view(batch_size,self.args.num_planets, -1)[valid_action_idx,valid_target_action]), dim=-1)
+            ratio_mean = torch.sigmoid(self.ratio_actor_mean(ratio_input))/2+0.5 # Min 0.5, max 1.0
             ratio_std = torch.clamp(self.ratio_actor_logstd.exp(), min=0.01, max=0.5)
             ratio_probs = Normal(ratio_mean, ratio_std)
             
             if action is None:
-                valid_target_action = target_probs.sample()
                 ratio_action[valid_action_idx] = torch.clamp(ratio_probs.sample(), 0.0, 1.0)
-                target_action[valid_action_idx] = valid_target_action
-            else:
-                valid_target_action = target_action[valid_action_idx]
 
             target_entropy[valid_action_idx] = target_probs.entropy() 
             target_logprob[valid_action_idx] = target_probs.log_prob(valid_target_action)
@@ -281,7 +286,7 @@ class PlanetWarsAgentGNN(nn.Module):
         total_logprob = source_logprob + target_logprob + ratio_logprob
         
         # Combined entropy
-        total_entropy = source_probs.entropy() + target_entropy + ratio_entropy
+        total_entropy = source_probs.entropy() + target_entropy #+ ratio_entropy #According to cleanrl entropy does not help in continuous actions, so we don't use it here
         
         # Get value
         value = self.critic(v_global_features)
@@ -296,7 +301,6 @@ class PlanetWarsAgentGNN(nn.Module):
             transporter_owners_per_edge = data.edge_attr[:, 0].view(num_planets,num_planets-1).unsqueeze(0) # [1, num_planets, num_planets-1]
             transporter_owners = torch.sum(transporter_owners_per_edge, dim=2) > 0  # [1, num_planets]
 
-
             #one-hot encode planet owners and transporter owners
             data.x = torch.cat((owner_one_hot_encoding(planet_owners.view(-1), self.player_id),
                             data.x[:, 1:]),
@@ -305,40 +309,53 @@ class PlanetWarsAgentGNN(nn.Module):
                                     data.edge_attr[:, 1:]), dim=-1)
 
             node_features, global_features = self.forward_gnn(data.x, data.edge_index, data.edge_attr)
-            # _, v_global_features = self.forward_value_gnn(data.x, data.edge_index, data.edge_attr)
 
-
-            # Get per-node logits for source and target selection
+            # Get per-node logits for source selection
             source_node_logits = self.source_actor(node_features).squeeze(-1)  # [num_nodes]
-            target_node_logits = self.target_actor(node_features).squeeze(-1)  # [num_nodes]
-            
-            # Get ship ratio distribution
-            ratio_mean = torch.sigmoid(self.ratio_actor_mean(global_features))
-            # ratio_mean = self.ratio_actor_mean(global_features)
-
             source_logits = source_node_logits.unsqueeze(0)  # [1, num_planets]
-            target_logits = target_node_logits.unsqueeze(0)  # [1, num_planets]
             
-            # Create masks
+            # Get no-op action logits
+            noop_logits = self.noop_actor(global_features)  # [1]
+            # Concatenate no-op logits with source logits
+            source_logits = torch.cat((noop_logits, source_logits), dim=1)  # [1, num_planets + 1]
+
+            # Create masks - same as get_action_and_value
             source_mask = torch.logical_and(planet_owners == self.player_id, transporter_owners == 0)
-            
+            source_mask = torch.cat((torch.ones(1, 1, dtype=torch.bool, device=source_mask.device), source_mask), dim=1)  # Add no-op mask
+
             # Create masked distributions for source selection
             source_probs = MaskedCategorical(logits=source_logits, mask=source_mask)
             
-            # Take highest probability source action
+            # Take highest probability source action (deterministic for inference)
             source_action = source_probs.probs.argmax(dim=-1)  # [1]
             
-            # Create target mask
-            target_mask = (planet_owners == 3-self.player_id).float()  #Currently targetting only opponent planets yields better results
+            # Initialize target and ratio actions
+            target_action = torch.zeros(1, dtype=torch.long, device=source_action.device)
+            ratio_action = torch.zeros(1, 1, dtype=torch.float, device=source_action.device)
             
-            # Prevent sending to self
-            target_mask[0, source_action[0]] = 0
-            
-            target_probs = MaskedCategorical(logits=target_logits, mask=target_mask)
-            target_action = target_probs.probs.argmax(dim=-1)  # [1]
-            
-            # Take mean for test time
-            ratio_action = torch.clamp(ratio_mean, 0.0, 1.0)
+            # Only sample target and ratio actions if source action is non-null (not no-op)
+            valid_action_idx = source_action != 0
+            if valid_action_idx.any():
+                # Get target logits for valid actions
+                target_logits = self.target_actor(node_features).squeeze(-1).unsqueeze(0)  # [1, num_planets]
+                
+                # Create target mask (opponent planets only, same as get_action_and_value)
+                target_mask = (planet_owners == 3-self.player_id).float()  # Only opponent planets
+                
+                # Prevent sending to self (source_action - 1 because source_action includes no-op offset)
+                target_mask[0, source_action[0] - 1] = 0
+                
+                target_probs = MaskedCategorical(logits=target_logits, mask=target_mask)
+                target_action = target_probs.probs.argmax(dim=-1)  # [1]
+                
+                # Get ship ratio distribution using source, target, and global features
+                ratio_input = torch.cat((global_features,
+                                    node_features[source_action[0] - 1].unsqueeze(0),  # -1 for no-op offset
+                                    node_features[target_action[0]].unsqueeze(0)), dim=-1)
+                ratio_mean = torch.sigmoid(self.ratio_actor_mean(ratio_input))/2+0.5  # Min 0.5, max 1.0
+                
+                # Take mean for test time (deterministic)
+                ratio_action = torch.clamp(ratio_mean, 0.0, 1.0)
             
             action = torch.cat([
                 source_action.float(),
@@ -346,12 +363,14 @@ class PlanetWarsAgentGNN(nn.Module):
                 ratio_action.squeeze(-1)
             ], dim=-1)
 
-        return action
+            return action
+        
     def copy(self):
         """Create a copy of the agent"""
         new_agent = PlanetWarsAgentGNN(self.args, self.player_id)
         new_agent.load_state_dict(self.state_dict())
         return new_agent
+    
     def copy_as_opponent(self):
         """Create a copy of the agent as an opponent"""
         new_agent = PlanetWarsAgentGNN(self.args, self.player_id)
