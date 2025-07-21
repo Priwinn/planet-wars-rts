@@ -55,59 +55,59 @@ class PlanetWarsAgentGNN(nn.Module):
         # self.a_conv3 = GATv2Conv(128*4, 64, heads=1, concat=False, edge_dim=5)
 
         #Residual Gated Graph Conv layers
-        self.v_conv1 = ResGatedGraphConv(self.node_feature_dim, 64, edge_dim=5)
-        self.v_conv2 = ResGatedGraphConv(64, 64, edge_dim=5)
-        self.a_conv1 = ResGatedGraphConv(self.node_feature_dim, 64, edge_dim=5)
-        self.a_conv2 = ResGatedGraphConv(64, 64, edge_dim=5)
+        self.v_conv1 = ResGatedGraphConv(self.node_feature_dim, 128, edge_dim=5)
+        self.v_conv2 = ResGatedGraphConv(128, 128, edge_dim=5)
+        self.a_conv1 = ResGatedGraphConv(self.node_feature_dim, 128, edge_dim=5)
+        self.a_conv2 = ResGatedGraphConv(128, 128, edge_dim=5)
 
         # Global graph feature extraction
         self.global_pool = global_mean_pool
         
         # Combine node embeddings and global features
         self.node_mlp = nn.Sequential(
-            layer_init(nn.Linear(64, 128)),
+            layer_init(nn.Linear(128, 256)),
             nn.ReLU(),
-            layer_init(nn.Linear(128, 64)),
+            layer_init(nn.Linear(256, 128)),
             nn.ReLU(),
         )
         
         self.global_mlp = nn.Sequential(
-            layer_init(nn.Linear(64, 128)),
+            layer_init(nn.Linear(128, 256)),
             nn.ReLU(),
-            layer_init(nn.Linear(128, 64)),
+            layer_init(nn.Linear(256, 128)),
             nn.ReLU(),
         )
         
         # Value head - uses global features
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(64, 32)),
+            layer_init(nn.Linear(128, 32)),
             nn.ReLU(),
             layer_init(nn.Linear(32, 1), std=1.0),
         )
         
         # Policy heads - use per-node features for source/target selection
         self.source_actor = nn.Sequential(
-            layer_init(nn.Linear(64, 32)),
+            layer_init(nn.Linear(128, 32)),
             nn.ReLU(),
             layer_init(nn.Linear(32, 1), std=0.01),  # Per-node logit
         )
         
         self.target_actor = nn.Sequential(
-            layer_init(nn.Linear(64, 32)),
+            layer_init(nn.Linear(2*128, 32)),
             nn.ReLU(),
             layer_init(nn.Linear(32, 1), std=0.01),  # Per-node logit
         )
 
         # No-op Policy Head - uses global features
         self.noop_actor = nn.Sequential(
-            layer_init(nn.Linear(64, 32)),
+            layer_init(nn.Linear(128, 32)),
             nn.ReLU(),
             layer_init(nn.Linear(32, 1), std=0.01)
         )
         
         # Ship ratio (continuous) - uses global features
         self.ratio_actor_mean = nn.Sequential(
-            layer_init(nn.Linear(3*64, 32)),
+            layer_init(nn.Linear(3*128, 32)),
             nn.ReLU(),
             layer_init(nn.Linear(32, 1), std=0.01),
         )
@@ -238,12 +238,17 @@ class PlanetWarsAgentGNN(nn.Module):
         #Only sample target and ratio actions if source action is non-null
         valid_action_idx = source_action != 0
         if valid_action_idx.any():
-            target_logits = self.target_actor(node_features.view(batch_size,self.args.num_planets, -1)[valid_action_idx]).squeeze(-1)  # [num_nodes]
+            #Concatenate sampled action to target input
+            source_features = node_features.view(batch_size,self.args.num_planets, -1)[valid_action_idx,source_action[valid_action_idx]-1].unsqueeze(1).expand(-1, self.args.num_planets, -1)  # [batches with valid actions, num_planets, node_feature_dim]
+            target_features = node_features.view(batch_size,self.args.num_planets, -1)[valid_action_idx]
+            target_features = torch.cat((source_features, target_features), dim=-1)
+
+            target_logits = self.target_actor(target_features).squeeze(-1)  # [num_nodes]
 
             # Create target mask (opponent planets + neutral, but not source planet)
-            # target_mask = torch.ones_like(planet_owners, dtype=torch.bool)  # All planets
-            # target_mask = (planet_owners != self.player_id).float()  # Not our planets
-            # target_mask = (planet_owners != 0).float()  # Not neutrals
+            # target_mask = torch.ones_like(planet_owners[valid_action_idx], dtype=torch.bool)  # All planets
+            # target_mask = (planet_owners[valid_action_idx] != self.player_id).float()  # Not our planets
+            # target_mask = (planet_owners[valid_action_idx] != 0).float()  # Not neutrals
             target_mask = (planet_owners[valid_action_idx] == 3-self.player_id).float()  #Currently targetting only opponent planets yields better results
 
             # Prevent sending to self
@@ -280,13 +285,13 @@ class PlanetWarsAgentGNN(nn.Module):
         ], dim=-1)
     
         # Calculate log probabilities
-        source_logprob = source_probs.log_prob(action[:, 0])  # +1 to account for no-op action
+        source_logprob = source_probs.log_prob(action[:, 0]) 
 
         # Combined log probability
         total_logprob = source_logprob + target_logprob + ratio_logprob
         
         # Combined entropy
-        total_entropy = source_probs.entropy() + target_entropy #+ ratio_entropy #According to cleanrl entropy does not help in continuous actions, so we don't use it here
+        total_entropy = source_probs.entropy() + target_entropy + ratio_entropy #According to cleanrl, entropy does not help in continuous actions
         
         # Get value
         value = self.critic(v_global_features)

@@ -56,7 +56,7 @@ class Args:
     """the learning rate of the optimizer"""
     num_envs: int = 6
     """the number of parallel game environments"""
-    num_steps: int = 256
+    num_steps: int = 512
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
@@ -85,7 +85,7 @@ class Args:
 
     # Planet Wars specific
     agent_type: str = "gnn"  # "mlp" or "gnn"
-    num_planets: int = 20
+    num_planets: int = 30
     """number of planets in the game"""
     node_feature_dim: int = 0 #Filled in runtime 5 for gnn, 14 for mlp
     """dimension of node features (owner, ship_count, growth_rate, x, y)"""
