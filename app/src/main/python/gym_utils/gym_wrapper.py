@@ -151,10 +151,10 @@ class PlanetWarsForwardModelEnv(gym.Env):
             device = next(self.opponent_policy.parameters()).device  # Same device as opponent, assume it is a PyTorch model
             opponent_action = self.opponent_policy.get_action(self._get_observation().to(device=device))
             opponent_action = tensor_to_action(opponent_action, self.opponent_player)
-        
-        else:
+        elif callable(self.opponent_policy):
             current_state = self.kotlin_bridge.get_game_state()
             opponent_action = self.opponent_policy(current_state)
+        
 
         # Create actions dict
         actions = {}
@@ -241,36 +241,6 @@ class PlanetWarsForwardModelEnv(gym.Env):
         planets = game_state['planets']
         node_features = torch.Tensor(np.stack([self._get_planet_features(p) for p in planets], axis=0))
         
-        
-        # Onehot owners
-        # owners = self._owner_one_hot_encoding(node_features[:, 0].long())
-        # transporter_owners = self._owner_one_hot_encoding(node_features[:, 5].long())
-        # node_features = torch.cat((owners, node_features[:, 1:5], transporter_owners, node_features[:, 6:]), dim=1)
-
-        # Add edges with distance-based weights
-        # for i in range(len(planets)):
-        #     for j in range(i + 1, len(planets)):
-        #         p1, p2 = planets[i], planets[j]
-        #         distance = np.sqrt((p1['x'] - p2['x'])**2 + (p1['y'] - p2['y'])**2)
-                
-        #         # Skip if distance exceeds threshold
-        #         if self.max_distance_threshold and distance > self.max_distance_threshold:
-        #             continue
-                
-        #         # Calculate inverse distance weight
-        #         weight = 1.0 / (distance ** self.distance_power + 1e-8)
-        #         graph.add_edge(i, j, distance=distance, weight=weight)
-        
-        # Normalize weights if requested
-        # if self.normalize_weights:
-        #     weights = [data['weight'] for _, _, data in graph.edges(data=True)]
-        #     if weights:
-        #         max_weight = max(weights)
-        #         for _, _, data in graph.edges(data=True):
-        #             data['weight'] /= max_weight
-        
-        # Extract features
-        
         return Data(
             x = node_features,
             edge_index=self.edge_index,
@@ -309,9 +279,6 @@ class PlanetWarsForwardModelEnv(gym.Env):
                 transporter['owner'],
                 # transporter['sourceIndex'],
                 transporter['destinationIndex'], 
-                # TODO: Consider symmetry when controlled player changes either:
-                # 1.- Swap planet labels (if using onehot, obs vector is different size depending on num planets)
-                # 2.- Use edge features for transporters
                 transporter['numShips'],
                 # Normalized transporter position
                 transporter['x']*transporter['vx']/(self.game_params['width'] * self.game_params['transporterSpeed']),

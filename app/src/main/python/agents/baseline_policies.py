@@ -57,12 +57,11 @@ class RandomPolicy(gym_policy):
 
 class GreedyPolicy(gym_policy):
     """Greedy opponent policy - attacks weakest nearby targets"""
-
     def __call__(self, game_state: Dict[str, Any]) -> Action:
         planets = game_state['planets']
         player_int = 1 if self.player == Player.Player1 else 2
 
-        # Find planets owned by the opponent that can send ships
+        # Find planets owned by the player that can send ships
         owned_planets = [
             p for p in planets 
             if (p['owner'] == player_int and 
@@ -82,24 +81,25 @@ class GreedyPolicy(gym_policy):
         if not target_candidates:
             return Action.do_nothing()
         
-        # Choose closest weak target
+        # Heuristic: prefer weak, nearby, fast-growing targets 
         def target_score(target):
             distance = np.sqrt((source['x'] - target['x'])**2 + (source['y'] - target['y'])**2)
-            strength = target['numShips'] if target['owner'] == 0 else target['numShips'] * 1.5
-            return distance + strength * 0.1
+            ship_strength = target['numShips'] if target['owner'] == 0 else target['numShips'] * 1.5
+            return ship_strength + distance - 2 * target['growthRate']
         
         target = min(target_candidates, key=target_score)
         
-        # Send appropriate number of ships
+        # Estimate whether the attack would succeed 
         distance = np.sqrt((source['x'] - target['x'])**2 + (source['y'] - target['y'])**2)
         eta = distance / self.game_params.get('transporterSpeed', 3.0)
         estimated_defense = target['numShips'] + target['growthRate'] * eta
         
-        num_ships = max(estimated_defense * 1.2, source['numShips'] * 0.5)
-        num_ships = min(num_ships, source['numShips'] * 0.8)
-        
-        if num_ships < 1:
+        # Check if attack would succeed 
+        if source['numShips'] <= estimated_defense:
             return Action.do_nothing()
+        
+        # Send half the ships
+        num_ships = source['numShips'] / 2
         
         return Action(
             player_id=self.player,
@@ -110,8 +110,8 @@ class GreedyPolicy(gym_policy):
     
 class FocusPolicy(gym_policy):
     """Focuses on a single target. Find closest target to centroid of owned planets and attack it until it is conquered."""
-    def __init__(self, game_params: Dict[str, Any]):
-        super().__init__(game_params)
+    def __init__(self, game_params: Dict[str, Any], player: Player = Player.Player1):
+        super().__init__(game_params, player)
         self.target_planet_id = None
 
     def __call__(self, game_state: Dict[str, Any]) -> Action:
@@ -152,18 +152,20 @@ class FocusPolicy(gym_policy):
                 if p['owner'] == (1 if self.player == Player.Player1 else 2) and
                 p.get('transporter') is None
             ]
+            if not owned_planets:
+                return Action.do_nothing()
             source = max(owned_planets, key=lambda p: p['numShips'])
             target = next(p for p in planets if p['id'] == self.target_planet_id)
 
             # Send appropriate number of ships
             distance = np.sqrt((source['x'] - target['x'])**2 + (source['y'] - target['y'])**2)
             eta = distance / self.game_params.get('transporterSpeed', 3.0)
-            estimated_defense = target['numShips'] + target['growthRate'] * eta
+            transporters = sum([p['transporter']['numShips'] for p in planets if p.get('transporter') is not None and p['transporter']["owner"] == player_int and p['transporter']['destinationIndex'] == target['id']])
+            estimated_defense = target['numShips'] + target['growthRate'] * eta - transporters
 
-            
             # Calculate the number of ships to send
             owned_ships = sum(p['numShips'] for p in owned_planets)
-            num_ships = min(estimated_defense * 1.5 * source['numShips'] / owned_ships, source['numShips'] * 0.8)
+            num_ships = min(estimated_defense * 1.5 * source['numShips'] / owned_ships, source['numShips'] * 0.8) 
 
 
             return Action(

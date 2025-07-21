@@ -168,7 +168,7 @@ class KotlinForwardModelBridge:
     def get_game_state(self) -> Dict[str, Any]:
         """Get current game state as Python dict"""
         if self.game_state is None:
-            return {}
+            raise ValueError("No game created. Call create_new_game() first.")
         
         # Get planets
         planets = []

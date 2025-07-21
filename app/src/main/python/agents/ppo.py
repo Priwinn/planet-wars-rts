@@ -23,7 +23,7 @@ from gym_utils.gym_wrapper import PlanetWarsForwardModelEnv, PlanetWarsForwardMo
 from core.game_state import Player
 from agents.mlp import PlanetWarsAgentMLP
 from agents.gnn import PlanetWarsAgentGNN, GraphInstanceToPyG
-from agents.baseline_policies import GreedyPolicy,RandomPolicy
+from agents.baseline_policies import GreedyPolicy,RandomPolicy, FocusPolicy, DefensivePolicy
 from gym_utils.self_play import NaiveSelfPlay
 
 
@@ -97,7 +97,7 @@ class Args:
     """Filled on run time, mlp uses flattened observation, gnn uses graph observation"""
     
     # Opponent configuration
-    opponent_type: str = "random"  # "random", "greedy", or "do_nothing"
+    opponent_type: str = "greedy"  # "random", "greedy", "focus", "defensive"
     """type of opponent to train against"""
     self_play: str = None 
 
@@ -112,14 +112,6 @@ class Args:
 
 def make_env(env_id, idx, capture_video, run_name, device, args):
     def thunk():        
-        # Configure opponent policy
-        if args.opponent_type == "random":
-            opponent_policy = "random"  # Will use default random policy
-        elif args.opponent_type == "greedy":
-            opponent_policy = "greedy"  # Will be set after env creation
-        elif args.opponent_type == None:
-            opponent_policy = None
-        
         if args.self_play == "naive":
             self_play = NaiveSelfPlay(player_id=2)
 
@@ -134,8 +126,7 @@ def make_env(env_id, idx, capture_video, run_name, device, args):
                     'transporterSpeed': 3.0,
                     'width': 640,
                     'height': 480
-                },
-                opponent_policy=opponent_policy
+                }
             )
         elif env_id == "PlanetWarsForwardModelGNN":
             env = PlanetWarsForwardModelGNNEnv(
@@ -149,13 +140,16 @@ def make_env(env_id, idx, capture_video, run_name, device, args):
                     'width': 640,
                     'height': 480
                 },
-                opponent_policy=opponent_policy,
                 self_play= self_play if args.self_play == "naive" else None
             )
-        if opponent_policy == "greedy":
+        if args.opponent_type == "greedy":
             env.set_opponent_policy(GreedyPolicy(game_params=env.game_params, player=Player.Player2))
-        elif opponent_policy == "random":
+        elif args.opponent_type == "random":
             env.set_opponent_policy(RandomPolicy(game_params=env.game_params, player=Player.Player2))
+        elif args.opponent_type == "focus":
+            env.set_opponent_policy(FocusPolicy(game_params=env.game_params, player=Player.Player2))
+        elif args.opponent_type == "defensive":
+            env.set_opponent_policy(DefensivePolicy(game_params=env.game_params, player=Player.Player2))
 
         env = PlanetWarsActionWrapper(env, args.num_planets, args.use_adjacency_matrix, args.flatten_observation, device, node_feature_dim=args.node_feature_dim)
         env = gym.wrappers.RecordEpisodeStatistics(env)
