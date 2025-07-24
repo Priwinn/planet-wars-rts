@@ -301,8 +301,8 @@ class PlanetWarsForwardModelEnv(gym.Env):
         for planet in planets:
             owner = planet['owner']
             
-            # Base score: ships + growth potential
-            planet_value = planet['numShips'] + planet['growthRate'] * 100 #* (self.game_params['maxTicks']- game_state['tick'])
+            # Base score: ship (+ growth rate)
+            planet_value = planet['numShips']  # planet['growthRate'] * (self.game_params['maxTicks']- game_state['tick'])
 
             if owner == self.player_int:
                 controlled_player_score += planet_value
@@ -350,9 +350,9 @@ class PlanetWarsForwardModelEnv(gym.Env):
         
         for planet in planets:
             if planet['owner'] == self.player_int:
-                controlled_delta += planet['numShips'] + planet['growthRate']
+                controlled_delta += planet['numShips']
             elif planet['owner'] == self.opponent_int:
-                opponent_delta += planet['numShips'] + planet['growthRate']
+                opponent_delta += planet['numShips']
 
         transporters = game_state.get('transporters', [])
         for transporter in transporters:
@@ -381,10 +381,10 @@ class PlanetWarsForwardModelEnv(gym.Env):
 
     def _calculate_reward(self, game_state: Dict[str, Any]) -> float:
         """Calculate reward based on game state for the controlled player"""
-        current_score = self._calculate_normalized_score_delta(game_state)*0.1
+        # current_score = self._calculate_normalized_score_delta(game_state)*0.1
         # current_score = self._calculate_growth_rate(game_state)/ self.game_params['maxTicks']
         # current_score = self._calculate_growth_delta(game_state)*0.1
-        # current_score = self._calculate_ship_delta(game_state)*0.1
+        current_score = self._calculate_ship_delta(game_state)*0.1
         
         # Reward is the change in score since last step
         # reward = current_score - self.previous_score

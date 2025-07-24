@@ -74,7 +74,7 @@ class Args:
     """the surrogate clipping coefficient"""
     clip_vloss: bool = True
     """Toggles whether or not to use a clipped loss for the value function, as per the paper."""
-    ent_coef: float = 0.01
+    ent_coef: float = 0.3
     """coefficient of the entropy"""
     vf_coef: float = 0.5
     """coefficient of the value function"""
@@ -85,7 +85,7 @@ class Args:
 
     # Planet Wars specific
     agent_type: str = "gnn"  # "mlp" or "gnn"
-    num_planets: int = 30
+    num_planets: int = 20
     """number of planets in the game"""
     node_feature_dim: int = 0 #Filled in runtime 5 for gnn, 14 for mlp
     """dimension of node features (owner, ship_count, growth_rate, x, y)"""
@@ -95,9 +95,11 @@ class Args:
     """whether to include adjacency matrix in observations"""
     flatten_observation: bool = True
     """Filled on run time, mlp uses flattened observation, gnn uses graph observation"""
+    discretized_ratio_bins: int = 11
+    """number of bins for the discretized ratio actor. Set to 0 to disable discretization"""
     
     # Opponent configuration
-    opponent_type: str = "greedy"  # "random", "greedy", "focus", "defensive"
+    opponent_type: str = "random"  # "random", "greedy", "focus", "defensive"
     """type of opponent to train against"""
     self_play: str = None 
 

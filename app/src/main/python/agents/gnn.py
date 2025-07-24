@@ -60,10 +60,10 @@ class PlanetWarsAgentGNN(nn.Module):
         self.a_conv1 = ResGatedGraphConv(self.node_feature_dim, 128, edge_dim=5)
         self.a_conv2 = ResGatedGraphConv(128, 128, edge_dim=5)
 
-        # Global graph feature extraction
+        # Global graph aggregation
         self.global_pool = global_mean_pool
         
-        # Combine node embeddings and global features
+        # Node and global feature MLPs
         self.node_mlp = nn.Sequential(
             layer_init(nn.Linear(128, 256)),
             nn.ReLU(),
@@ -71,7 +71,14 @@ class PlanetWarsAgentGNN(nn.Module):
             nn.ReLU(),
         )
         
-        self.global_mlp = nn.Sequential(
+        self.v_global_mlp = nn.Sequential(
+            layer_init(nn.Linear(128, 256)),
+            nn.ReLU(),
+            layer_init(nn.Linear(256, 128)),
+            nn.ReLU(),
+        )
+
+        self.a_global_mlp = nn.Sequential(
             layer_init(nn.Linear(128, 256)),
             nn.ReLU(),
             layer_init(nn.Linear(256, 128)),
@@ -106,12 +113,20 @@ class PlanetWarsAgentGNN(nn.Module):
         )
         
         # Ship ratio (continuous) - uses global features
-        self.ratio_actor_mean = nn.Sequential(
-            layer_init(nn.Linear(3*128, 32)),
-            nn.ReLU(),
-            layer_init(nn.Linear(32, 1), std=0.01),
-        )
-        self.ratio_actor_logstd = nn.Parameter(torch.zeros(1))
+        if args.discretized_ratio_bins == 0:
+            self.ratio_actor_mean = nn.Sequential(
+                layer_init(nn.Linear(3*128, 32)),
+                nn.ReLU(),
+                layer_init(nn.Linear(32, 1), std=0.01),
+            )
+            self.ratio_actor_logstd = nn.Parameter(torch.zeros(1))
+        else:
+            #Discretized ratio actor
+            self.ratio_actor = nn.Sequential(
+                layer_init(nn.Linear(3*128, 32)),
+                nn.ReLU(),
+                layer_init(nn.Linear(32, self.args.discretized_ratio_bins), std=0.01),
+            )
 
     def forward_gnn(self, x, edge_index, edge_attr, batch=None):
         """Forward pass through GNN layers"""
@@ -135,7 +150,7 @@ class PlanetWarsAgentGNN(nn.Module):
             # Batch case
             global_features = self.global_pool(h, batch)
         
-        global_features = self.global_mlp(global_features)
+        global_features = self.a_global_mlp(global_features)
         
         return node_features, global_features
     
@@ -155,9 +170,9 @@ class PlanetWarsAgentGNN(nn.Module):
         else:
             # Batch case
             global_features = self.global_pool(h, batch)
-        
-        global_features = self.global_mlp(global_features)
-        
+
+        global_features = self.v_global_mlp(global_features)
+
         return h, global_features
 
 
@@ -175,6 +190,7 @@ class PlanetWarsAgentGNN(nn.Module):
 
         _, global_features = self.forward_value_gnn(x, data.edge_index, edge_attr, batch)
         return self.critic(global_features)
+    
 
     def get_action_and_value(self, obs, action=None):
         """Get action probabilities and value"""
@@ -266,18 +282,53 @@ class PlanetWarsAgentGNN(nn.Module):
             ratio_input = torch.cat((global_features[valid_action_idx],
                                     node_features.view(batch_size,self.args.num_planets, -1)[valid_action_idx,source_action[valid_action_idx]-1],
                                     node_features.view(batch_size,self.args.num_planets, -1)[valid_action_idx,valid_target_action]), dim=-1)
-            ratio_mean = torch.sigmoid(self.ratio_actor_mean(ratio_input))/2+0.5 # Min 0.5, max 1.0
-            ratio_std = torch.clamp(self.ratio_actor_logstd.exp(), min=0.01, max=0.5)
-            ratio_probs = Normal(ratio_mean, ratio_std)
+            if self.args.discretized_ratio_bins == 0:
+                ratio_mean = self.ratio_actor_mean(ratio_input)
+                ratio_std = self.ratio_actor_logstd.exp()
+                ratio_probs = Normal(ratio_mean, ratio_std)
+            else:
+                ratio_probs = Categorical(logits=self.ratio_actor(ratio_input))
+                
+            if self.args.discretized_ratio_bins == 0:
+                if action is None:
+                    raw_ratio = ratio_probs.sample()
+                    ratio_action[valid_action_idx] = torch.sigmoid(raw_ratio) / 2 + 0.5
+                    # Log prob calculation
+                    ratio_logprob_raw = ratio_probs.log_prob(raw_ratio).squeeze(-1)
+                    # Jacobian correction
+                    jacobian = torch.sigmoid(raw_ratio) * (1 - torch.sigmoid(raw_ratio)) / 2
+                    ratio_logprob[valid_action_idx] = ratio_logprob_raw #- torch.log(jacobian).squeeze(-1) 
+                    # According to https://openreview.net/forum?id=nIAxjsniDzg it does not affect policy loss or KL but it does affect entropy
+                else:
+                    # Inverse transform provided action back to raw space
+                    transformed_ratio = (ratio_action[valid_action_idx] - 0.5) * 2  # [0,1] range
+                    raw_ratio_action = torch.logit(torch.clamp(transformed_ratio, 1e-6, 1-1e-6))  # Avoid inf
+                    # Calculate log prob in raw space
+                    ratio_logprob_raw = ratio_probs.log_prob(raw_ratio_action).squeeze(-1)
+                    # Jacobian correction
+                    jacobian = torch.sigmoid(raw_ratio_action) * (1 - torch.sigmoid(raw_ratio_action)) / 2
+                    ratio_logprob[valid_action_idx] = ratio_logprob_raw #- torch.log(jacobian).squeeze(-1) 
+                    # According to https://openreview.net/forum?id=nIAxjsniDzg it does not affect policy loss or KL but it does affect entropy
             
-            if action is None:
-                ratio_action[valid_action_idx] = torch.clamp(ratio_probs.sample(), 0.0, 1.0)
+            if self.args.discretized_ratio_bins > 0:
+                if action is None:
+                    ratio_action[valid_action_idx] = ratio_probs.sample().unsqueeze(-1)
+                    ratio_logprob[valid_action_idx] = ratio_probs.log_prob(ratio_action[valid_action_idx].squeeze(-1))
+                    ratio_action[valid_action_idx] = ratio_action[valid_action_idx] / (self.args.discretized_ratio_bins-1)  # Scale to [0,1]
+                else:
+                    discrete_ratio_action = ratio_action[valid_action_idx] * (self.args.discretized_ratio_bins-1)
+                    discrete_ratio_action = discrete_ratio_action.long()
+                    ratio_logprob[valid_action_idx] = ratio_probs.log_prob(discrete_ratio_action).squeeze(-1)
 
             target_entropy[valid_action_idx] = target_probs.entropy() 
             target_logprob[valid_action_idx] = target_probs.log_prob(valid_target_action)
-            ratio_logprob[valid_action_idx] = ratio_probs.log_prob(ratio_action[valid_action_idx]).squeeze(-1)
-            ratio_entropy[valid_action_idx] = ratio_probs.entropy().squeeze(-1)
-            
+            if self.args.discretized_ratio_bins == 0:
+                # Add log(jacobian) to entropy to match https://openreview.net/forum?id=nIAxjsniDzg
+                ratio_entropy[valid_action_idx] = ratio_probs.entropy() + torch.log(jacobian).squeeze(-1)
+            else:
+                ratio_entropy[valid_action_idx] = ratio_probs.entropy()
+
+
         action = torch.stack([
             source_action.float(),
             target_action.float(),
@@ -295,6 +346,8 @@ class PlanetWarsAgentGNN(nn.Module):
         
         # Get value
         value = self.critic(v_global_features)
+
+
         
         return action, total_logprob, total_entropy, value
 
