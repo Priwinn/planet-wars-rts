@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal, Categorical
 from torch_geometric.nn import GCNConv, GATConv, global_mean_pool, global_max_pool, GATv2Conv, ResGatedGraphConv
+from torch_geometric.nn import Sequential as PyGSequential
 from torch_geometric.data import Data, Batch
 from typing import Tuple, Union, List
 from gym_utils.gym_wrapper import owner_one_hot_encoding
@@ -13,6 +14,18 @@ from gymnasium.spaces import GraphInstance
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
+
+def layer_init_gat(layer, std=np.sqrt(2), bias_const=0.0):
+    torch.nn.init.orthogonal_(layer.lin_l.weight, std)
+    torch.nn.init.constant_(layer.lin_l.bias, bias_const)
+    torch.nn.init.orthogonal_(layer.lin_r.weight, std)
+    torch.nn.init.constant_(layer.lin_r.bias, bias_const)
+    if layer.lin_edge is not None:
+        torch.nn.init.orthogonal_(layer.lin_edge.weight, std)
+        # torch.nn.init.constant_(layer.lin_edge.bias, bias_const) # PyG GATv2Conv does not have bias in edge linear layer
+    torch.nn.init.constant_(layer.bias, bias_const)
+    torch.nn.init.orthogonal_(layer.att, std)
     return layer
 
 def GraphInstanceToPyG(graph_instance):
@@ -44,21 +57,37 @@ class PlanetWarsAgentGNN(nn.Module):
         # self.conv3 = GCNConv(128, 64)
         
         # Graph Attention Network layers (edge features)
-        # self.v_conv1 = GATv2Conv(self.node_feature_dim, 64, heads=4, concat=True, edge_dim=5)
-        # self.v_conv2 = GATv2Conv(64*4, 64, heads=1, concat=False, edge_dim=5)
-        # self.v_conv2 = GATv2Conv(64*4, 128, heads=4, concat=True, edge_dim=5)
-        # self.v_conv3 = GATv2Conv(128*4, 64, heads=1, concat=False, edge_dim=5)
+        # self.a_gnn = PyGSequential('x, edge_index, edge_attr', [
+        #     (layer_init_gat(GATv2Conv(self.node_feature_dim, 128, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+        #     nn.ReLU(),
+        #     (layer_init_gat(GATv2Conv(128*4, 128, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+        #     nn.ReLU(),
+        #     (layer_init_gat(GATv2Conv(128*4, 128, heads=1, concat=False, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+        # ])
 
-        # self.a_conv1 = GATv2Conv(self.node_feature_dim, 64, heads=4, concat=True, edge_dim=5)
-        # self.a_conv2 = GATv2Conv(64*4, 64, heads=1, concat=False, edge_dim=5)
-        # self.a_conv2 = GATv2Conv(64*4, 128, heads=4, concat=True, edge_dim=5)
-        # self.a_conv3 = GATv2Conv(128*4, 64, heads=1, concat=False, edge_dim=5)
+        self.v_gnn = PyGSequential('x, edge_index, edge_attr', [
+            (layer_init_gat(GATv2Conv(self.node_feature_dim, 128, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+            nn.ReLU(),
+            (layer_init_gat(GATv2Conv(128*4, 128, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+            nn.ReLU(),
+            (layer_init_gat(GATv2Conv(128*4, 128, heads=1, concat=False, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+        ])
 
         #Residual Gated Graph Conv layers
-        self.v_conv1 = ResGatedGraphConv(self.node_feature_dim, 128, edge_dim=5)
-        self.v_conv2 = ResGatedGraphConv(128, 128, edge_dim=5)
-        self.a_conv1 = ResGatedGraphConv(self.node_feature_dim, 128, edge_dim=5)
-        self.a_conv2 = ResGatedGraphConv(128, 128, edge_dim=5)
+        # self.v_gnn = PyGSequential('x, edge_index, edge_attr', [
+        #     (ResGatedGraphConv(self.node_feature_dim, 128, edge_dim=5), 'x, edge_index, edge_attr -> x'),
+        #     nn.ReLU(),
+        #     (ResGatedGraphConv(128, 128, edge_dim=5), 'x, edge_index, edge_attr -> x'),
+        #     nn.ReLU(),
+        #     (ResGatedGraphConv(128, 128, edge_dim=5), 'x, edge_index, edge_attr -> x'),
+        # ])
+        self.a_gnn = PyGSequential('x, edge_index, edge_attr', [
+            (ResGatedGraphConv(self.node_feature_dim, 128, edge_dim=5), 'x, edge_index, edge_attr -> x'),
+            nn.ReLU(),
+            (ResGatedGraphConv(128, 128, edge_dim=5), 'x, edge_index, edge_attr -> x'),
+            nn.ReLU(),
+            (ResGatedGraphConv(128, 128, edge_dim=5), 'x, edge_index, edge_attr -> x'),
+        ])
 
         # Global graph aggregation
         self.global_pool = global_mean_pool
@@ -131,13 +160,7 @@ class PlanetWarsAgentGNN(nn.Module):
     def forward_gnn(self, x, edge_index, edge_attr, batch=None):
         """Forward pass through GNN layers"""
         # GNN forward pass
-        h = self.a_conv1(x, edge_index, edge_attr)
-        h = F.relu(h)
-        h = self.a_conv2(h, edge_index, edge_attr)
-        # h = F.relu(h)
-        # h = self.a_conv3(h, edge_index, edge_attr)
-
-        
+        h = self.a_gnn(x, edge_index, edge_attr)
 
         # Per-node features
         node_features = self.node_mlp(h)
@@ -157,11 +180,7 @@ class PlanetWarsAgentGNN(nn.Module):
     def forward_value_gnn(self, x, edge_index, edge_attr, batch=None):
         """Forward pass through GNN layers for value estimation"""
         # GNN forward pass
-        h = self.v_conv1(x, edge_index, edge_attr)
-        h = F.relu(h)
-        h = self.v_conv2(h, edge_index, edge_attr)
-        # h = F.relu(h)
-        # h = self.v_conv3(h, edge_index, edge_attr)
+        h = self.v_gnn(x, edge_index, edge_attr)
 
         # Global features
         if batch is None:
@@ -312,21 +331,21 @@ class PlanetWarsAgentGNN(nn.Module):
             
             if self.args.discretized_ratio_bins > 0:
                 if action is None:
-                    ratio_action[valid_action_idx] = ratio_probs.sample().unsqueeze(-1)
-                    ratio_logprob[valid_action_idx] = ratio_probs.log_prob(ratio_action[valid_action_idx].squeeze(-1))
-                    ratio_action[valid_action_idx] = ratio_action[valid_action_idx] / (self.args.discretized_ratio_bins-1)  # Scale to [0,1]
+                    ratio_action_bins = ratio_probs.sample().unsqueeze(-1)
+                    ratio_logprob[valid_action_idx] = ratio_probs.log_prob(ratio_action_bins.squeeze(-1))
+                    ratio_action[valid_action_idx] = ratio_action_bins / (self.args.discretized_ratio_bins-1)  # Scale to [0,1]
                 else:
                     discrete_ratio_action = ratio_action[valid_action_idx] * (self.args.discretized_ratio_bins-1)
                     discrete_ratio_action = discrete_ratio_action.long()
-                    ratio_logprob[valid_action_idx] = ratio_probs.log_prob(discrete_ratio_action).squeeze(-1)
+                    ratio_logprob[valid_action_idx] = ratio_probs.log_prob(discrete_ratio_action.squeeze(-1))
 
             target_entropy[valid_action_idx] = target_probs.entropy() 
             target_logprob[valid_action_idx] = target_probs.log_prob(valid_target_action)
             if self.args.discretized_ratio_bins == 0:
                 # Add log(jacobian) to entropy to match https://openreview.net/forum?id=nIAxjsniDzg
-                ratio_entropy[valid_action_idx] = ratio_probs.entropy() + torch.log(jacobian).squeeze(-1)
+                ratio_entropy[valid_action_idx] = ratio_probs.entropy().squeeze(-1) + torch.log(jacobian).squeeze(-1)
             else:
-                ratio_entropy[valid_action_idx] = ratio_probs.entropy()
+                ratio_entropy[valid_action_idx] = ratio_probs.entropy().squeeze(-1)
 
 
         action = torch.stack([

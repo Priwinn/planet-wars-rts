@@ -56,13 +56,13 @@ class Args:
     """the learning rate of the optimizer"""
     num_envs: int = 6
     """the number of parallel game environments"""
-    num_steps: int = 512
+    num_steps: int = 256
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
     gamma: float = 0.99
     """the discount factor gamma"""
-    gae_lambda: float = 0.99
+    gae_lambda: float = 0.95
     """the lambda for the general advantage estimation"""
     num_minibatches: int = 4
     """the number of mini-batches"""
@@ -70,15 +70,15 @@ class Args:
     """the K epochs to update the policy"""
     norm_adv: bool = True
     """Toggles advantages normalization"""
-    clip_coef: float = 0.2
+    clip_coef: float = 0.1
     """the surrogate clipping coefficient"""
     clip_vloss: bool = True
     """Toggles whether or not to use a clipped loss for the value function, as per the paper."""
-    ent_coef: float = 0.3
+    ent_coef: float = 0.005
     """coefficient of the entropy"""
-    vf_coef: float = 0.5
+    vf_coef: float = 1.3
     """coefficient of the value function"""
-    max_grad_norm: float = 0.5
+    max_grad_norm: float = 3.5
     """the maximum norm for the gradient clipping"""
     target_kl: float = None
     """the target KL divergence threshold"""
@@ -97,9 +97,11 @@ class Args:
     """Filled on run time, mlp uses flattened observation, gnn uses graph observation"""
     discretized_ratio_bins: int = 11
     """number of bins for the discretized ratio actor. Set to 0 to disable discretization"""
+    new_map_each_run: bool = False
+    """whether to create a new map for each run or use the same map"""
     
     # Opponent configuration
-    opponent_type: str = "random"  # "random", "greedy", "focus", "defensive"
+    opponent_type: str = "greedy"  # "random", "greedy", "focus", "defensive"
     """type of opponent to train against"""
     self_play: str = None 
 
@@ -127,7 +129,8 @@ def make_env(env_id, idx, capture_video, run_name, device, args):
                     'maxTicks': args.max_ticks,
                     'transporterSpeed': 3.0,
                     'width': 640,
-                    'height': 480
+                    'height': 480,
+                    'newMapEachRun': args.new_map_each_run
                 }
             )
         elif env_id == "PlanetWarsForwardModelGNN":
@@ -155,6 +158,7 @@ def make_env(env_id, idx, capture_video, run_name, device, args):
 
         env = PlanetWarsActionWrapper(env, args.num_planets, args.use_adjacency_matrix, args.flatten_observation, device, node_feature_dim=args.node_feature_dim)
         env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = gym.wrappers.NormalizeReward(env)
         return env
 
     return thunk
@@ -276,6 +280,7 @@ if __name__ == "__main__":
 
     if args.agent_type == "gnn":
         agent = PlanetWarsAgentGNN(args).to(device)
+        agent.compile()
     else:
         agent = PlanetWarsAgentMLP(args).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
@@ -359,7 +364,7 @@ if __name__ == "__main__":
                         episode_reward = infos.get("episode", {}).get("r", 0.0)[i]
                         episode_rewards.append(episode_reward)
                         episode_lengths.append(episode_length)
-                        win = reward[i] == 1.0 
+                        win = infos.get("leader")[i] == infos.get("controlled_player")[i]
                         win_rate.append(1.0 if win else 0.0)
                         lesson_episode_count += 1
 
@@ -381,37 +386,48 @@ if __name__ == "__main__":
                             envs = gym.vector.SyncVectorEnv(
                                 [make_env(args.env_id, i, args.capture_video, run_name, device, args) for i in range(args.num_envs)],
                             )
-                        if (recent_win_rate >= 0.95 and lesson_episode_count >= 50 and args.opponent_type == "greedy"):
-                            args.self_play = "naive"  # Switch to self-play
-                            print(f"Lesson completed in {curriculum_step} steps, switching to self-play with self-play type '{args.self_play}'.")
+                        # If win rate is good, generate new maps for next lesson
+                        if recent_win_rate >= 0.75 and lesson_episode_count >= 100 and args.opponent_type == "greedy":
+                            print(f"Generating new map for lesson {lesson_number} with opponent type '{args.opponent_type}'")
                             curriculum_step = 0
                             lesson_episode_count = 0
-                            args.opponent_type = None
                             lesson_number += 1
-                            
                             envs.close()
                             envs = gym.vector.SyncVectorEnv(
                                 [make_env(args.env_id, i, args.capture_video, run_name, device, args) for i in range(args.num_envs)],
                             )
-                            for env in envs.envs:
-                                env.env.env.self_play.add_opponent(agent.copy_as_opponent().to('cpu'))  # Add a copy of the agent as opponent in self-play
-                            envs.reset()
-                            #Save the model after switching to self-play
-                            torch.save({
-                                'iteration': iteration,
-                                'model_state_dict': agent.state_dict(),
-                                'optimizer_state_dict': optimizer.state_dict(),
-                                'args': args,
-                            }, f"models/{run_name}_greedy.pt")
-                        if (recent_win_rate >= 0.7 and lesson_episode_count >= 50 and args.self_play == "naive"):
-                            print(f"Lesson completed in {curriculum_step} steps, updating opponent policy in self-play.")
-                            curriculum_step = 0
-                            lesson_episode_count = 0
-                            lesson_number += 1
+                            envs.reset(seed=args.seed + lesson_number)  # Reset with a new seed for new map (kotlin bridge probably doesnt use this anyway, but a new instance should make a new map)
+                        # if (recent_win_rate >= 0.95 and lesson_episode_count >= 50 and args.opponent_type == "greedy"):
+                        #     args.self_play = "naive"  # Switch to self-play
+                        #     print(f"Lesson completed in {curriculum_step} steps, switching to self-play with self-play type '{args.self_play}'.")
+                        #     curriculum_step = 0
+                        #     lesson_episode_count = 0
+                        #     args.opponent_type = None
+                        #     lesson_number += 1
                             
-                            for env in envs.envs:
-                                env.env.env.self_play.add_opponent(agent.copy_as_opponent().to('cpu'))  # Update opponent policy in self-play
-                            envs.reset()
+                        #     envs.close()
+                        #     envs = gym.vector.SyncVectorEnv(
+                        #         [make_env(args.env_id, i, args.capture_video, run_name, device, args) for i in range(args.num_envs)],
+                        #     )
+                        #     for env in envs.envs:
+                        #         env.env.env.self_play.add_opponent(agent.copy_as_opponent().to('cpu'))  # Add a copy of the agent as opponent in self-play
+                        #     envs.reset()
+                        #     #Save the model after switching to self-play
+                        #     torch.save({
+                        #         'iteration': iteration,
+                        #         'model_state_dict': agent.state_dict(),
+                        #         'optimizer_state_dict': optimizer.state_dict(),
+                        #         'args': args,
+                        #     }, f"models/{run_name}_greedy.pt")
+                        # if (recent_win_rate >= 0.7 and lesson_episode_count >= 50 and args.self_play == "naive"):
+                        #     print(f"Lesson completed in {curriculum_step} steps, updating opponent policy in self-play.")
+                        #     curriculum_step = 0
+                        #     lesson_episode_count = 0
+                        #     lesson_number += 1
+                            
+                        #     for env in envs.envs:
+                        #         env.env.env.self_play.add_opponent(agent.copy_as_opponent().to('cpu'))  # Update opponent policy in self-play
+                        #     envs.reset()
 
         # Bootstrap value if not done
         with torch.no_grad():
@@ -552,6 +568,9 @@ if __name__ == "__main__":
                 'optimizer_state_dict': optimizer.state_dict(),
                 'args': args,
             }, f"models/{run_name}_iter_{iteration}.pt")
+            if wandb.run:
+                wandb.save(f"models/{run_name}_iter_{iteration}.pt")
+
         
 
     # Save final model

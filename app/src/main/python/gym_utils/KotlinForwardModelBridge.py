@@ -15,14 +15,13 @@ from core.game_state import Player, Action
 class KotlinForwardModelBridge:
     """Bridge to interact with Kotlin ForwardModel for local game simulation using JPype"""
     
-    def __init__(self, jar_path: str = None, auto_start_jvm: bool = True, fixed_map: bool = False):
+    def __init__(self, jar_path: str = None, auto_start_jvm: bool = True):
         self.jar_path = jar_path or self._find_jar_path()
         self.forward_model = None
         self.game_state = None
         self.game_params = None
         self._jvm_started = False
         self.initial_game_state = None
-        self.fixed_map = fixed_map
         
         if auto_start_jvm:
             self.start_jvm()
@@ -74,9 +73,14 @@ class KotlinForwardModelBridge:
         else:
             self.game_params = self._create_game_params_from_dict(game_params)
         
-        # Create game state
-        game_state_factory = self.GameStateFactory(self.game_params)
-        self.game_state = game_state_factory.createGame()
+        # Create game state 
+        if self.initial_game_state is not None and game_params.get('newMapEachRun', True) == False:
+            # If we have an initial game state, use it
+            self.game_state = self.initial_game_state.deepCopy()
+        else:
+            game_state_factory = self.GameStateFactory(self.game_params)
+            self.game_state = game_state_factory.createGame()
+            self.initial_game_state = self.game_state.deepCopy()  # Store initial state for cloning
         
         # Create forward model
         self.forward_model = self.ForwardModel(self.game_state, self.game_params)

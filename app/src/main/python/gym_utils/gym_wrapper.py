@@ -127,6 +127,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
         """Reset the environment and return initial observation"""
         self.kotlin_bridge.create_new_game(self.game_params)
         initial_state = self.kotlin_bridge.get_game_state()
+        
         obs = self._get_observation()
         self.previous_score = self._calculate_normalized_score_delta(initial_state)
         if self.self_play:
@@ -172,7 +173,12 @@ class PlanetWarsForwardModelEnv(gym.Env):
         
         # Check truncation
         truncated = game_state['tick'] >= self.max_ticks and not game_state['isTerminal']
-                # Additional info
+
+        # Penalize for no-op actions if there is a planet to send ships from
+        # if controlled_action.source_planet_id == -1 and not done and not truncated:    
+        #     reward -= 0.1/self.max_ticks  
+
+        # Additional info
         info = {
             'tick': game_state['tick'],
             'leader': game_state['leader'],
@@ -302,7 +308,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
             owner = planet['owner']
             
             # Base score: ship (+ growth rate)
-            planet_value = planet['numShips']  # planet['growthRate'] * (self.game_params['maxTicks']- game_state['tick'])
+            planet_value = planet['numShips'] + planet['growthRate'] * 100 #* (self.game_params['maxTicks']- game_state['tick'])
 
             if owner == self.player_int:
                 controlled_player_score += planet_value
@@ -382,9 +388,9 @@ class PlanetWarsForwardModelEnv(gym.Env):
     def _calculate_reward(self, game_state: Dict[str, Any]) -> float:
         """Calculate reward based on game state for the controlled player"""
         # current_score = self._calculate_normalized_score_delta(game_state)*0.1
-        # current_score = self._calculate_growth_rate(game_state)/ self.game_params['maxTicks']
-        # current_score = self._calculate_growth_delta(game_state)*0.1
-        current_score = self._calculate_ship_delta(game_state)*0.1
+        # current_score = self._calculate_growth_rate(game_state)/ self.game_params['maxTicks']*10
+        current_score = self._calculate_growth_delta(game_state)*0.1
+        # current_score = self._calculate_ship_delta(game_state)*0.1
         
         # Reward is the change in score since last step
         # reward = current_score - self.previous_score
@@ -441,13 +447,34 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.edge_attr = torch.Tensor(np.stack(
-            [self._get_default_edge_features(edge[0], edge[1]) for edge in self.edge_index.permute(1, 0).numpy()]
-        ))
+        self.edge_attr = None
 
-
+    def reset(self, **kwargs) -> Tuple[Data, Dict[str, Any]]:
+        """Reset the environment and return initial observation"""
+        self.kotlin_bridge.create_new_game(self.game_params)
+        initial_state = self.kotlin_bridge.get_game_state()
+        # Reset edge attributes based on new game state if newMapEachRun is True
+        if self.game_params.get('newMapEachRun', True) or self.edge_attr is None:
+            self.edge_attr = torch.Tensor(np.stack(
+                [self._get_default_edge_features(edge[0], edge[1]) for edge in self.edge_index.permute(1, 0).numpy()]
+            ))
+        obs = self._get_observation()
+        self.previous_score = self._calculate_normalized_score_delta(initial_state)
+        if self.self_play:
+            self.opponent_policy = self.self_play.get_opponent()
+        return obs, {
+            'tick': initial_state['tick'],
+            'leader': initial_state['leader'],
+            'status': 'Game started',
+            'player1Ships': initial_state['player1Ships'],
+            'player2Ships': initial_state['player2Ships']
+        }
 
     def _get_observation(self) -> Data:
+        if self.edge_attr is None:
+            self.edge_attr = torch.Tensor(np.stack(
+                [self._get_default_edge_features(edge[0], edge[1]) for edge in self.edge_index.permute(1, 0).numpy()]
+            ))
         game_state = self.kotlin_bridge.get_game_state()
         planets = game_state['planets']
         node_features = torch.Tensor(np.stack([self._get_planet_features(p) for p in planets], axis=0))
