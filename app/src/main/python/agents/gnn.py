@@ -50,6 +50,7 @@ class PlanetWarsAgentGNN(nn.Module):
         
         # Node feature dimension from gym wrapper
         self.node_feature_dim = args.node_feature_dim + 2 # +2 for planet owner one-hot encodings
+        self.hidden_dim = args.hidden_dim if hasattr(args, 'hidden_dim') else 128  # Default hidden dimension
         
         # GNN layers (edge weights)
         # self.conv1 = GCNConv(self.node_feature_dim, 64)
@@ -57,86 +58,86 @@ class PlanetWarsAgentGNN(nn.Module):
         # self.conv3 = GCNConv(128, 64)
         
         # Graph Attention Network layers (edge features)
-        # self.a_gnn = PyGSequential('x, edge_index, edge_attr', [
-        #     (layer_init_gat(GATv2Conv(self.node_feature_dim, 128, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
-        #     nn.ReLU(),
-        #     (layer_init_gat(GATv2Conv(128*4, 128, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
-        #     nn.ReLU(),
-        #     (layer_init_gat(GATv2Conv(128*4, 128, heads=1, concat=False, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
-        # ])
+        self.a_gnn = PyGSequential('x, edge_index, edge_attr', [
+            (layer_init_gat(GATv2Conv(self.node_feature_dim, self.hidden_dim, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+            nn.ReLU(),
+            (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+            nn.ReLU(),
+            (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=1, concat=False, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+        ])
 
         self.v_gnn = PyGSequential('x, edge_index, edge_attr', [
-            (layer_init_gat(GATv2Conv(self.node_feature_dim, 128, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+            (layer_init_gat(GATv2Conv(self.node_feature_dim, self.hidden_dim, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
             nn.ReLU(),
-            (layer_init_gat(GATv2Conv(128*4, 128, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
-            nn.ReLU(),
-            (layer_init_gat(GATv2Conv(128*4, 128, heads=1, concat=False, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+            # (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+            # nn.ReLU(),
+            (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=1, concat=False, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
         ])
 
         #Residual Gated Graph Conv layers
         # self.v_gnn = PyGSequential('x, edge_index, edge_attr', [
-        #     (ResGatedGraphConv(self.node_feature_dim, 128, edge_dim=5), 'x, edge_index, edge_attr -> x'),
+        #     (ResGatedGraphConv(self.node_feature_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
         #     nn.ReLU(),
-        #     (ResGatedGraphConv(128, 128, edge_dim=5), 'x, edge_index, edge_attr -> x'),
+        #     (ResGatedGraphConv(self.hidden_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
         #     nn.ReLU(),
-        #     (ResGatedGraphConv(128, 128, edge_dim=5), 'x, edge_index, edge_attr -> x'),
+        #     (ResGatedGraphConv(self.hidden_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
         # ])
-        self.a_gnn = PyGSequential('x, edge_index, edge_attr', [
-            (ResGatedGraphConv(self.node_feature_dim, 128, edge_dim=5), 'x, edge_index, edge_attr -> x'),
-            nn.ReLU(),
-            (ResGatedGraphConv(128, 128, edge_dim=5), 'x, edge_index, edge_attr -> x'),
-            nn.ReLU(),
-            (ResGatedGraphConv(128, 128, edge_dim=5), 'x, edge_index, edge_attr -> x'),
-        ])
+        # self.a_gnn = PyGSequential('x, edge_index, edge_attr', [
+        #     (ResGatedGraphConv(self.node_feature_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
+        #     nn.ReLU(),
+        #     (ResGatedGraphConv(self.hidden_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
+        #     nn.ReLU(),
+        #     (ResGatedGraphConv(self.hidden_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
+        # ])
 
         # Global graph aggregation
         self.global_pool = global_mean_pool
         
         # Node and global feature MLPs
-        self.node_mlp = nn.Sequential(
-            layer_init(nn.Linear(128, 256)),
-            nn.ReLU(),
-            layer_init(nn.Linear(256, 128)),
-            nn.ReLU(),
-        )
+        # self.node_mlp = nn.Sequential(
+        #     layer_init(nn.Linear(self.hidden_dim, self.hidden_dim)),
+        #     nn.ReLU(),
+        #     layer_init(nn.Linear(self.hidden_dim, self.hidden_dim)),
+        #     nn.ReLU(),
+        # )
         
-        self.v_global_mlp = nn.Sequential(
-            layer_init(nn.Linear(128, 256)),
-            nn.ReLU(),
-            layer_init(nn.Linear(256, 128)),
-            nn.ReLU(),
-        )
+        # self.v_global_mlp = nn.Sequential(
+        #     layer_init(nn.Linear(128, 256)),
+        #     nn.ReLU(),
+        #     layer_init(nn.Linear(256, 128)),
+        #     nn.ReLU(),
+        # )
 
-        self.a_global_mlp = nn.Sequential(
-            layer_init(nn.Linear(128, 256)),
-            nn.ReLU(),
-            layer_init(nn.Linear(256, 128)),
-            nn.ReLU(),
-        )
+        # self.a_global_mlp = nn.Sequential(
+        #     layer_init(nn.Linear(self.hidden_dim, self.hidden_dim)),
+        #     nn.ReLU(),
+        #     layer_init(nn.Linear(self.hidden_dim, self.hidden_dim)),
+        #     nn.ReLU(),
+        # )
         
         # Value head - uses global features
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(128, 32)),
+            layer_init(nn.Linear(self.hidden_dim, 32)),
             nn.ReLU(),
             layer_init(nn.Linear(32, 1), std=1.0),
         )
         
         # Policy heads - use per-node features for source/target selection
         self.source_actor = nn.Sequential(
-            layer_init(nn.Linear(128, 32)),
+            layer_init(nn.Linear(self.hidden_dim, 32)),
             nn.ReLU(),
             layer_init(nn.Linear(32, 1), std=0.01),  # Per-node logit
         )
         
         self.target_actor = nn.Sequential(
-            layer_init(nn.Linear(2*128, 32)),
+            layer_init(nn.Linear(2*self.hidden_dim, 32)),
             nn.ReLU(),
             layer_init(nn.Linear(32, 1), std=0.01),  # Per-node logit
         )
 
         # No-op Policy Head - uses global features
         self.noop_actor = nn.Sequential(
-            layer_init(nn.Linear(128, 32)),
+            layer_init(nn.Linear(self.hidden_dim, 32)),
             nn.ReLU(),
             layer_init(nn.Linear(32, 1), std=0.01)
         )
@@ -144,7 +145,7 @@ class PlanetWarsAgentGNN(nn.Module):
         # Ship ratio (continuous) - uses global features
         if args.discretized_ratio_bins == 0:
             self.ratio_actor_mean = nn.Sequential(
-                layer_init(nn.Linear(3*128, 32)),
+                layer_init(nn.Linear(3*self.hidden_dim, 32)),
                 nn.ReLU(),
                 layer_init(nn.Linear(32, 1), std=0.01),
             )
@@ -152,7 +153,7 @@ class PlanetWarsAgentGNN(nn.Module):
         else:
             #Discretized ratio actor
             self.ratio_actor = nn.Sequential(
-                layer_init(nn.Linear(3*128, 32)),
+                layer_init(nn.Linear(3*self.hidden_dim, 32)),
                 nn.ReLU(),
                 layer_init(nn.Linear(32, self.args.discretized_ratio_bins), std=0.01),
             )
@@ -163,7 +164,7 @@ class PlanetWarsAgentGNN(nn.Module):
         h = self.a_gnn(x, edge_index, edge_attr)
 
         # Per-node features
-        node_features = self.node_mlp(h)
+        # node_features = self.node_mlp(h)
         
         # Global features
         if batch is None:
@@ -173,9 +174,9 @@ class PlanetWarsAgentGNN(nn.Module):
             # Batch case
             global_features = self.global_pool(h, batch)
         
-        global_features = self.a_global_mlp(global_features)
+        # global_features = self.a_global_mlp(global_features)
         
-        return node_features, global_features
+        return h, global_features
     
     def forward_value_gnn(self, x, edge_index, edge_attr, batch=None):
         """Forward pass through GNN layers for value estimation"""
@@ -190,9 +191,9 @@ class PlanetWarsAgentGNN(nn.Module):
             # Batch case
             global_features = self.global_pool(h, batch)
 
-        global_features = self.v_global_mlp(global_features)
+        value = self.critic(global_features)
 
-        return h, global_features
+        return value
 
 
     def get_value(self, obs):
@@ -207,15 +208,15 @@ class PlanetWarsAgentGNN(nn.Module):
         edge_attr=torch.cat((owner_one_hot_encoding(transporter_owners_per_edge, self.player_id),
                             data.edge_attr[:, 1:]), dim=-1)
 
-        _, global_features = self.forward_value_gnn(x, data.edge_index, edge_attr, batch)
-        return self.critic(global_features)
-    
+        value = self.forward_value_gnn(x, data.edge_index, edge_attr, batch)
+        return value
+
 
     def get_action_and_value(self, obs, action=None):
         """Get action probabilities and value"""
         if isinstance(obs, Union[Tuple, List]):
             obs = Batch.from_data_list(obs)
-        else:
+        elif isinstance(obs, Data):
             obs = Batch.from_data_list([obs])  # Ensure obs is a Batch object
         data, batch = obs, obs.batch
         batch_size = batch.max().item() + 1
@@ -227,15 +228,16 @@ class PlanetWarsAgentGNN(nn.Module):
         transporter_owners = torch.sum(transporter_owners_per_edge, dim=2) > 0
 
         #one-hot encode planet owners and transporter owners
-
         data.x = torch.cat((owner_one_hot_encoding(planet_owners.view(-1), self.player_id),
                            data.x[:, 1:]),
                           dim=-1)
         data.edge_attr = torch.cat((owner_one_hot_encoding(transporter_owners_per_edge.view(-1), self.player_id),
                                    data.edge_attr[:, 1:]), dim=-1)
-
+        
+        # Forward pass through GNN
         node_features, global_features = self.forward_gnn(data.x, data.edge_index, data.edge_attr, batch)
-        _, v_global_features = self.forward_value_gnn(data.x, data.edge_index, data.edge_attr, batch)
+        # Get value from GNN
+        value = self.forward_value_gnn(data.x, data.edge_index, data.edge_attr, batch)
 
         # Get per-node logits for source selection
         source_node_logits = self.source_actor(node_features).squeeze(-1)  # [num_nodes]
@@ -362,11 +364,6 @@ class PlanetWarsAgentGNN(nn.Module):
         
         # Combined entropy
         total_entropy = source_probs.entropy() + target_entropy + ratio_entropy #According to cleanrl, entropy does not help in continuous actions
-        
-        # Get value
-        value = self.critic(v_global_features)
-
-
         
         return action, total_logprob, total_entropy, value
 

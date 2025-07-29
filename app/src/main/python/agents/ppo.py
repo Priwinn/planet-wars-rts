@@ -1,14 +1,18 @@
 import os
 import random
+import shutil
 import time
 from dataclasses import dataclass
 import sys
 from itertools import chain
+import glob
 
 import gymnasium as gym
 from gymnasium.spaces import GraphInstance
 from torch_geometric.data import Data as PyGData
 from torch_geometric.data import Batch as PyGBatch
+from torch_geometric.data import InMemoryDataset
+from torch_geometric.loader import DataLoader
 import numpy as np
 import torch
 import torch.nn as nn
@@ -50,11 +54,11 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "PlanetWarsForwardModel"
     """the id of the environment. Filled in runtime, either `PlanetWarsForwardModel` or `PlanetWarsForwardModelGNN` according to agent type"""
-    total_timesteps: int = 2000000
+    total_timesteps: int = 1000000
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
-    num_envs: int = 6
+    num_envs: int = 48
     """the number of parallel game environments"""
     num_steps: int = 256
     """the number of steps to run in each environment per policy rollout"""
@@ -70,11 +74,11 @@ class Args:
     """the K epochs to update the policy"""
     norm_adv: bool = True
     """Toggles advantages normalization"""
-    clip_coef: float = 0.1
+    clip_coef: float = 0.2
     """the surrogate clipping coefficient"""
     clip_vloss: bool = True
     """Toggles whether or not to use a clipped loss for the value function, as per the paper."""
-    ent_coef: float = 0.005
+    ent_coef: float = 0.01
     """coefficient of the entropy"""
     vf_coef: float = 1.3
     """coefficient of the value function"""
@@ -95,10 +99,14 @@ class Args:
     """whether to include adjacency matrix in observations"""
     flatten_observation: bool = True
     """Filled on run time, mlp uses flattened observation, gnn uses graph observation"""
-    discretized_ratio_bins: int = 11
+    discretized_ratio_bins: int = 0
     """number of bins for the discretized ratio actor. Set to 0 to disable discretization"""
-    new_map_each_run: bool = False
+    new_map_each_run: bool = True
     """whether to create a new map for each run or use the same map"""
+    hidden_dim: int = 256
+    """hidden dimension for the layers"""
+    profile_path: str = None
+    """Path to save profiling data, if None profiling is disabled"""
     
     # Opponent configuration
     opponent_type: str = "greedy"  # "random", "greedy", "focus", "defensive"
@@ -265,6 +273,19 @@ if __name__ == "__main__":
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
+    if args.profile_path is not None:
+        os.makedirs(args.profile_path, exist_ok=True)
+        profiler = torch.profiler.profile(
+            schedule=torch.profiler.schedule(
+                wait=1, warmup=1, active=2, repeat=1),
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                args.profile_path),
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=True
+        )
+        profiler.start()
+
     # Seeding
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -280,7 +301,7 @@ if __name__ == "__main__":
 
     if args.agent_type == "gnn":
         agent = PlanetWarsAgentGNN(args).to(device)
-        agent.compile()
+        agent.compile(dynamic=True)
     else:
         agent = PlanetWarsAgentMLP(args).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
@@ -289,8 +310,8 @@ if __name__ == "__main__":
     if args.flatten_observation:
         obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
     else:
-        obs = [[PyGData(x=torch.zeros((args.num_planets, args.node_feature_dim), dtype=torch.float32).to(device),
-                             edge_index=torch.zeros((2, args.num_planets * (args.num_planets-1)), dtype=torch.int64).to(device)
+        obs = [[PyGData(x=torch.zeros((args.num_planets, args.node_feature_dim), dtype=torch.float32),
+                             edge_index=torch.zeros((2, args.num_planets * (args.num_planets-1)), dtype=torch.int64)
                              ) 
                              for _ in range(args.num_envs)] for _ in range(args.num_steps)]
 
@@ -306,8 +327,8 @@ if __name__ == "__main__":
     next_obs, _ = envs.reset(seed=args.seed)
     if args.flatten_observation:
         next_obs = torch.Tensor(next_obs).to(device)
-    else:
-        next_obs = [(o).to(device) for o in next_obs]
+    # else:
+    #     next_obs = [(o).to(device) for o in next_obs]
     next_done = torch.zeros(args.num_envs).to(device)
     curriculum_step = 0
     lesson_number = 0
@@ -333,13 +354,16 @@ if __name__ == "__main__":
         for step in range(0, args.num_steps):
             global_step += args.num_envs
             curriculum_step += args.num_envs
-            obs[step] = next_obs
-
+            if args.flatten_observation or step == 0:
+                obs[step] = next_obs
             dones[step] = next_done
 
             # Action logic
             with torch.no_grad():
-                action, logprob, _, value = agent.get_action_and_value(next_obs)
+                if args.flatten_observation:
+                    action, logprob, _, value = agent.get_action_and_value(next_obs)
+                else:
+                    action, logprob, _, value = agent.get_action_and_value(PyGBatch.from_data_list(next_obs).to(device))
                 values[step] = value.flatten()
             actions[step] = action
             logprobs[step] = logprob
@@ -352,9 +376,12 @@ if __name__ == "__main__":
             if args.flatten_observation:
                 next_obs = torch.Tensor(next_obs).to(device)
             else:
-                next_obs = [o.to(device) for o in next_obs]  # Convert each observation to device
+                if step < args.num_steps - 1:
+                    obs[step+1] = [o for o in next_obs]  # Keep on cpu for dataloader
+                
             next_done = torch.Tensor(next_done).to(device)
-
+            if args.profile_path is not None:
+                profiler.step()  # Step the profiler if profiling is enabled
 
             # Log episode statistics
             if next_done.any():
@@ -387,16 +414,16 @@ if __name__ == "__main__":
                                 [make_env(args.env_id, i, args.capture_video, run_name, device, args) for i in range(args.num_envs)],
                             )
                         # If win rate is good, generate new maps for next lesson
-                        if recent_win_rate >= 0.75 and lesson_episode_count >= 100 and args.opponent_type == "greedy":
-                            print(f"Generating new map for lesson {lesson_number} with opponent type '{args.opponent_type}'")
-                            curriculum_step = 0
-                            lesson_episode_count = 0
-                            lesson_number += 1
-                            envs.close()
-                            envs = gym.vector.SyncVectorEnv(
-                                [make_env(args.env_id, i, args.capture_video, run_name, device, args) for i in range(args.num_envs)],
-                            )
-                            envs.reset(seed=args.seed + lesson_number)  # Reset with a new seed for new map (kotlin bridge probably doesnt use this anyway, but a new instance should make a new map)
+                        # if recent_win_rate >= 0.75 and lesson_episode_count >= 100 and args.opponent_type == "greedy":
+                        #     print(f"Generating new map for lesson {lesson_number} with opponent type '{args.opponent_type}'")
+                        #     curriculum_step = 0
+                        #     lesson_episode_count = 0
+                        #     lesson_number += 1
+                        #     envs.close()
+                        #     envs = gym.vector.SyncVectorEnv(
+                        #         [make_env(args.env_id, i, args.capture_video, run_name, device, args) for i in range(args.num_envs)],
+                        #     )
+                        #     envs.reset(seed=args.seed + lesson_number)  # Reset with a new seed for new map (kotlin bridge probably doesnt use this anyway, but a new instance should make a new map)
                         # if (recent_win_rate >= 0.95 and lesson_episode_count >= 50 and args.opponent_type == "greedy"):
                         #     args.self_play = "naive"  # Switch to self-play
                         #     print(f"Lesson completed in {curriculum_step} steps, switching to self-play with self-play type '{args.self_play}'.")
@@ -431,7 +458,10 @@ if __name__ == "__main__":
 
         # Bootstrap value if not done
         with torch.no_grad():
-            next_value = agent.get_value(next_obs).reshape(1, -1)
+            if args.flatten_observation:
+                next_value = agent.get_value(next_obs).reshape(1, -1)
+            else:
+                next_value = agent.get_value(PyGBatch.from_data_list(next_obs).to(device)).reshape(1, -1)
             advantages = torch.zeros_like(rewards).to(device)
             lastgaelam = 0
             for t in reversed(range(args.num_steps)):
@@ -449,7 +479,7 @@ if __name__ == "__main__":
         if args.flatten_observation:
             b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
         else:
-            b_obs = PyGBatch.from_data_list(list(chain.from_iterable(obs))).to(device)
+            b_obs = list(chain.from_iterable(obs))  # Flatten list of lists to a single list
         b_logprobs = logprobs.reshape(-1)
         b_actions = actions.reshape((-1, 3))
         b_advantages = advantages.reshape(-1)
@@ -467,7 +497,7 @@ if __name__ == "__main__":
                 if args.flatten_observation:
                     _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
                 else:
-                    _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs.index_select(mb_inds), b_actions[mb_inds])
+                    _, newlogprob, entropy, newvalue = agent.get_action_and_value(PyGBatch.from_data_list([b_obs[idx] for idx in mb_inds]).to(device), b_actions[mb_inds])
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
 
@@ -568,10 +598,15 @@ if __name__ == "__main__":
                 'optimizer_state_dict': optimizer.state_dict(),
                 'args': args,
             }, f"models/{run_name}_iter_{iteration}.pt")
-            if wandb.run:
+            if args.track:
                 wandb.save(f"models/{run_name}_iter_{iteration}.pt")
-
         
+
+    if args.profile_path is not None:
+        profiler.stop()
+        profile_files = glob.glob(f"{args.profile_path}/*")
+        for file in profile_files:
+            wandb.save(file, base_path=args.profile_path)
 
     # Save final model
     os.makedirs("models", exist_ok=True)
@@ -581,10 +616,19 @@ if __name__ == "__main__":
         'optimizer_state_dict': optimizer.state_dict(),
         'args': args,
     }, f"models/{run_name}_final.pt")
+    if args.track:
+        wandb.save(f"models/{run_name}_final.pt")
+
 
     envs.close()
     writer.close()
-    
+    # Delete profile files and its contents (recursively)
+    if args.track:
+        wandb.finish()
+    if args.profile_path is not None:
+        shutil.rmtree(args.profile_path)
+
+
     print(f"\nTraining completed!")
     print(f"Final win rate: {np.mean(win_rate[-100:]) if len(win_rate) >= 100 else 0.0:.3f}")
     print(f"Model saved as: models/{run_name}_final.pt")
