@@ -58,13 +58,13 @@ class PlanetWarsAgentGNN(nn.Module):
         # self.conv3 = GCNConv(128, 64)
         
         # Graph Attention Network layers (edge features)
-        self.a_gnn = PyGSequential('x, edge_index, edge_attr', [
-            (layer_init_gat(GATv2Conv(self.node_feature_dim, self.hidden_dim, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
-            nn.ReLU(),
-            (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
-            nn.ReLU(),
-            (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=1, concat=False, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
-        ])
+        # self.a_gnn = PyGSequential('x, edge_index, edge_attr', [
+        #     (layer_init_gat(GATv2Conv(self.node_feature_dim, self.hidden_dim, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+        #     nn.ReLU(),
+        #     (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+        #     nn.ReLU(),
+        #     (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=1, concat=False, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+        # ])
 
         self.v_gnn = PyGSequential('x, edge_index, edge_attr', [
             (layer_init_gat(GATv2Conv(self.node_feature_dim, self.hidden_dim, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
@@ -82,13 +82,13 @@ class PlanetWarsAgentGNN(nn.Module):
         #     nn.ReLU(),
         #     (ResGatedGraphConv(self.hidden_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
         # ])
-        # self.a_gnn = PyGSequential('x, edge_index, edge_attr', [
-        #     (ResGatedGraphConv(self.node_feature_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
-        #     nn.ReLU(),
-        #     (ResGatedGraphConv(self.hidden_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
-        #     nn.ReLU(),
-        #     (ResGatedGraphConv(self.hidden_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
-        # ])
+        self.a_gnn = PyGSequential('x, edge_index, edge_attr', [
+            (ResGatedGraphConv(self.node_feature_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
+            nn.ReLU(),
+            (ResGatedGraphConv(self.hidden_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
+            nn.ReLU(),
+            (ResGatedGraphConv(self.hidden_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
+        ])
 
         # Global graph aggregation
         self.global_pool = global_mean_pool
@@ -117,29 +117,29 @@ class PlanetWarsAgentGNN(nn.Module):
         
         # Value head - uses global features
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(self.hidden_dim, 32)),
+            layer_init(nn.Linear(self.hidden_dim, self.hidden_dim)),
             nn.ReLU(),
-            layer_init(nn.Linear(32, 1), std=1.0),
+            layer_init(nn.Linear(self.hidden_dim, 1), std=1.0),
         )
         
         # Policy heads - use per-node features for source/target selection
         self.source_actor = nn.Sequential(
-            layer_init(nn.Linear(self.hidden_dim, 32)),
+            layer_init(nn.Linear(self.hidden_dim, self.hidden_dim)),
             nn.ReLU(),
-            layer_init(nn.Linear(32, 1), std=0.01),  # Per-node logit
+            layer_init(nn.Linear(self.hidden_dim, 1), std=0.01),  # Per-node logit
         )
         
         self.target_actor = nn.Sequential(
-            layer_init(nn.Linear(2*self.hidden_dim, 32)),
+            layer_init(nn.Linear(2*self.hidden_dim, self.hidden_dim)),
             nn.ReLU(),
-            layer_init(nn.Linear(32, 1), std=0.01),  # Per-node logit
+            layer_init(nn.Linear(self.hidden_dim, 1), std=0.01),  # Per-node logit
         )
 
         # No-op Policy Head - uses global features
         self.noop_actor = nn.Sequential(
-            layer_init(nn.Linear(self.hidden_dim, 32)),
+            layer_init(nn.Linear(self.hidden_dim, self.hidden_dim)),
             nn.ReLU(),
-            layer_init(nn.Linear(32, 1), std=0.01)
+            layer_init(nn.Linear(self.hidden_dim, 1), std=0.01)
         )
         
         # Ship ratio (continuous) - uses global features
@@ -363,7 +363,7 @@ class PlanetWarsAgentGNN(nn.Module):
         total_logprob = source_logprob + target_logprob + ratio_logprob
         
         # Combined entropy
-        total_entropy = source_probs.entropy() + target_entropy + ratio_entropy #According to cleanrl, entropy does not help in continuous actions
+        total_entropy = source_probs.entropy() + target_entropy + 10*ratio_entropy #According to cleanrl, entropy does not help in continuous actions
         
         return action, total_logprob, total_entropy, value
 
@@ -411,8 +411,10 @@ class PlanetWarsAgentGNN(nn.Module):
             valid_action_idx = source_action != 0
             if valid_action_idx.any():
                 # Get target logits for valid actions
-                target_logits = self.target_actor(node_features).squeeze(-1).unsqueeze(0)  # [1, num_planets]
-                
+                source_features = node_features[source_action[valid_action_idx]-1].unsqueeze(1).expand(num_planets, -1)  # [batches with valid actions, num_planets, node_feature_dim]
+                target_features = torch.cat((source_features, node_features), dim=-1)
+                target_logits = self.target_actor(target_features).squeeze(-1).unsqueeze(0)  # [1, num_planets]
+
                 # Create target mask (opponent planets only, same as get_action_and_value)
                 target_mask = (planet_owners == 3-self.player_id).float()  # Only opponent planets
                 
@@ -426,10 +428,14 @@ class PlanetWarsAgentGNN(nn.Module):
                 ratio_input = torch.cat((global_features,
                                     node_features[source_action[0] - 1].unsqueeze(0),  # -1 for no-op offset
                                     node_features[target_action[0]].unsqueeze(0)), dim=-1)
-                ratio_mean = torch.sigmoid(self.ratio_actor_mean(ratio_input))/2+0.5  # Min 0.5, max 1.0
-                
-                # Take mean for test time (deterministic)
-                ratio_action = torch.clamp(ratio_mean, 0.0, 1.0)
+                if self.args.discretized_ratio_bins == 0:
+                    ratio_mean = torch.sigmoid(self.ratio_actor_mean(ratio_input))/2+0.5  # Min 0.5, max 1.0
+                    ratio_action = ratio_mean
+                else:
+                    ratio_action = torch.argmax(self.ratio_actor(ratio_input), dim=-1)
+                    ratio_action = ratio_action.float() / (self.args.discretized_ratio_bins-1)
+
+
             
             action = torch.cat([
                 source_action.float(),

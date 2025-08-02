@@ -42,6 +42,13 @@ def tensor_to_action(tensor: torch.Tensor, player_id: Player) -> Action:
         num_ships=num_ships
         )
 
+def are_there_valid_actions(game_state: Dict[str, Any], player_id: Player) -> bool:
+    """Check if there are any valid actions for the given player in the current game state."""
+    for planet in game_state['planets']:
+        if planet['owner'] == player_id and planet['transporter'] is not None:
+            return True
+    return False
+
 class PlanetWarsForwardModelEnv(gym.Env):
     """
     Gym environment that uses the Kotlin ForwardModel for local game simulation
@@ -129,7 +136,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
         initial_state = self.kotlin_bridge.get_game_state()
         
         obs = self._get_observation()
-        self.previous_score = self._calculate_normalized_score_delta(initial_state)
+
         if self.self_play:
             self.opponent_policy = self.self_play.get_opponent()
         return obs, {
@@ -175,8 +182,8 @@ class PlanetWarsForwardModelEnv(gym.Env):
         truncated = game_state['tick'] >= self.max_ticks and not game_state['isTerminal']
 
         # Penalize for no-op actions if there is a planet to send ships from
-        # if controlled_action.source_planet_id == -1 and not done and not truncated:    
-        #     reward -= 0.1/self.max_ticks  
+        if controlled_action.source_planet_id == -1 and are_there_valid_actions(game_state, self.controlled_player):
+            reward -= 2
 
         # Additional info
         info = {
@@ -333,8 +340,23 @@ class PlanetWarsForwardModelEnv(gym.Env):
         if total_score == 0:
             return 0.0
         
-        return (controlled_player_score - opponent_score) / (self.game_params['maxTicks'])
-    
+        return (controlled_player_score - opponent_score)
+
+    def _calculate_change_in_score_delta(self, game_state: Dict[str, Any]) -> float:
+        """Calculate change in score delta based on game state for the controlled player"""
+        current_score = self._calculate_normalized_score_delta(game_state)
+        previous_score = self.previous_score if self.previous_score is not None else 0
+        self.previous_score = current_score
+        return (current_score - previous_score)
+
+    def _calculate_change_in_ship_delta(self, game_state: Dict[str, Any]) -> float:
+        """Calculate change in ship delta based on game state for the controlled player"""
+        current_score = self._calculate_ship_delta(game_state)
+        previous_score = self.previous_score if self.previous_score is not None else 0
+        self.previous_score = current_score
+
+        return (current_score - previous_score)
+
     def _calculate_growth_rate(self, game_state: Dict[str, Any]) -> float:
         """Calculate growth rate based on game state for the controlled player"""
         planets = game_state['planets']
@@ -389,9 +411,10 @@ class PlanetWarsForwardModelEnv(gym.Env):
         """Calculate reward based on game state for the controlled player"""
         # current_score = self._calculate_normalized_score_delta(game_state)*0.1
         # current_score = self._calculate_growth_rate(game_state)/ self.game_params['maxTicks']*10
-        current_score = self._calculate_growth_delta(game_state)*0.1
+        # current_score = self._calculate_growth_delta(game_state)*0.1
         # current_score = self._calculate_ship_delta(game_state)*0.1
-        
+        current_score = self._calculate_change_in_score_delta(game_state)/20
+
         # Reward is the change in score since last step
         # reward = current_score - self.previous_score
         # self.previous_score = current_score
@@ -400,9 +423,9 @@ class PlanetWarsForwardModelEnv(gym.Env):
         # If game is terminal, give a final reward based on outcome
         if game_state['isTerminal'] or game_state['tick'] >= self.max_ticks:
             if game_state['leader'] == self.player_int:
-                return 1.0
+                return 10.0
             elif game_state['leader'] == self.opponent_int:
-                return -1.0
+                return -10.0
             else:
                 return 0.0
         return reward
@@ -459,7 +482,6 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
                 [self._get_default_edge_features(edge[0], edge[1]) for edge in self.edge_index.permute(1, 0).numpy()]
             ))
         obs = self._get_observation()
-        self.previous_score = self._calculate_normalized_score_delta(initial_state)
         if self.self_play:
             self.opponent_policy = self.self_play.get_opponent()
         return obs, {

@@ -54,13 +54,13 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "PlanetWarsForwardModel"
     """the id of the environment. Filled in runtime, either `PlanetWarsForwardModel` or `PlanetWarsForwardModelGNN` according to agent type"""
-    total_timesteps: int = 1000000
+    total_timesteps: int = 10000000
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
-    num_envs: int = 48
+    num_envs: int = 1
     """the number of parallel game environments"""
-    num_steps: int = 256
+    num_steps: int = 4096
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
@@ -99,15 +99,17 @@ class Args:
     """whether to include adjacency matrix in observations"""
     flatten_observation: bool = True
     """Filled on run time, mlp uses flattened observation, gnn uses graph observation"""
-    discretized_ratio_bins: int = 0
+    discretized_ratio_bins: int = 11
     """number of bins for the discretized ratio actor. Set to 0 to disable discretization"""
-    new_map_each_run: bool = True
+    new_map_each_run: bool = False
     """whether to create a new map for each run or use the same map"""
     hidden_dim: int = 256
     """hidden dimension for the layers"""
     profile_path: str = None
     """Path to save profiling data, if None profiling is disabled"""
-    
+    use_async: bool = True
+    """if toggled, AsyncVectorEnv will be used"""
+
     # Opponent configuration
     opponent_type: str = "greedy"  # "random", "greedy", "focus", "defensive"
     """type of opponent to train against"""
@@ -120,6 +122,8 @@ class Args:
     """the mini-batch size (computed in runtime)"""
     num_iterations: int = 0
     """the number of iterations (computed in runtime)"""
+    run_name: str = 'temp'
+    """the name of the run (computed in runtime)"""
 
 
 def make_env(env_id, idx, capture_video, run_name, device, args):
@@ -171,6 +175,11 @@ def make_env(env_id, idx, capture_video, run_name, device, args):
 
     return thunk
 
+def make_vector_env(env_id, capture_video, run_name, device, args):
+    if args.use_async:
+        return gym.vector.AsyncVectorEnv([make_env(env_id, i, capture_video, run_name, device, args) for i in range(args.num_envs)], shared_memory=False)
+    else:
+        return gym.vector.SyncVectorEnv([make_env(env_id, i, capture_video, run_name, device, args) for i in range(args.num_envs)])
 
 class PlanetWarsActionWrapper(gym.Wrapper):
     """Wrapper to flatten the tuple action space for Planet Wars"""
@@ -251,7 +260,11 @@ if __name__ == "__main__":
     args.flatten_observation = args.agent_type != "gnn"
     args.env_id = "PlanetWarsForwardModelGNN" if args.agent_type == "gnn" else "PlanetWarsForwardModel"
     args.node_feature_dim = 3 if args.agent_type == "gnn" else 10
-    run_name = f"{args.env_id}__{args.exp_name}__{args.opponent_type}__adj_{args.use_adjacency_matrix}__{args.seed}__{int(time.time())}"
+    args.run_name = f"{args.env_id}__{args.exp_name}__{args.opponent_type}__{int(time.time())}"
+
+    if args.use_async:
+        import multiprocessing as mp
+        mp.set_start_method("spawn")
     
     if args.track:
         import wandb
@@ -260,14 +273,14 @@ if __name__ == "__main__":
             entity=args.wandb_entity,
             sync_tensorboard=True,
             config=vars(args),
-            name=run_name,
+            name=args.run_name,
             monitor_gym=True,
             save_code=True,
         )
         print(f"Logging code for {os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}")
         wandb.run.log_code(f"{os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}")
-    
-    writer = SummaryWriter(f"runs/{run_name}")
+
+    writer = SummaryWriter(f"runs/{args.run_name}")
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
@@ -295,8 +308,12 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # Environment setup
-    envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, i, args.capture_video, run_name, device, args) for i in range(args.num_envs)],
+    envs = make_vector_env(
+        env_id=args.env_id,
+        capture_video=args.capture_video,
+        run_name=args.run_name,
+        device=device,
+        args=args
     )
 
     if args.agent_type == "gnn":
@@ -410,9 +427,7 @@ if __name__ == "__main__":
                             lesson_episode_count = 0
                             lesson_number += 1
                             envs.close()
-                            envs = gym.vector.SyncVectorEnv(
-                                [make_env(args.env_id, i, args.capture_video, run_name, device, args) for i in range(args.num_envs)],
-                            )
+                            envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args)
                         # If win rate is good, generate new maps for next lesson
                         # if recent_win_rate >= 0.75 and lesson_episode_count >= 100 and args.opponent_type == "greedy":
                         #     print(f"Generating new map for lesson {lesson_number} with opponent type '{args.opponent_type}'")
@@ -421,7 +436,7 @@ if __name__ == "__main__":
                         #     lesson_number += 1
                         #     envs.close()
                         #     envs = gym.vector.SyncVectorEnv(
-                        #         [make_env(args.env_id, i, args.capture_video, run_name, device, args) for i in range(args.num_envs)],
+                        #         [make_env(args.env_id, i, args.capture_video, args.run_name, device, args) for i in range(args.num_envs)],
                         #     )
                         #     envs.reset(seed=args.seed + lesson_number)  # Reset with a new seed for new map (kotlin bridge probably doesnt use this anyway, but a new instance should make a new map)
                         # if (recent_win_rate >= 0.95 and lesson_episode_count >= 50 and args.opponent_type == "greedy"):
@@ -434,7 +449,7 @@ if __name__ == "__main__":
                             
                         #     envs.close()
                         #     envs = gym.vector.SyncVectorEnv(
-                        #         [make_env(args.env_id, i, args.capture_video, run_name, device, args) for i in range(args.num_envs)],
+                        #         [make_env(args.env_id, i, args.capture_video, args.run_name, device, args) for i in range(args.num_envs)],
                         #     )
                         #     for env in envs.envs:
                         #         env.env.env.self_play.add_opponent(agent.copy_as_opponent().to('cpu'))  # Add a copy of the agent as opponent in self-play
@@ -445,7 +460,7 @@ if __name__ == "__main__":
                         #         'model_state_dict': agent.state_dict(),
                         #         'optimizer_state_dict': optimizer.state_dict(),
                         #         'args': args,
-                        #     }, f"models/{run_name}_greedy.pt")
+                        #     }, f"models/{args.run_name}_greedy.pt")
                         # if (recent_win_rate >= 0.7 and lesson_episode_count >= 50 and args.self_play == "naive"):
                         #     print(f"Lesson completed in {curriculum_step} steps, updating opponent policy in self-play.")
                         #     curriculum_step = 0
@@ -541,6 +556,7 @@ if __name__ == "__main__":
                 optimizer.step()
 
             if args.target_kl is not None and approx_kl > args.target_kl:
+                print("Early stopping at epoch {}: reached target KL divergence".format(epoch))
                 break
 
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
@@ -591,16 +607,16 @@ if __name__ == "__main__":
         sys.stdout.flush()
 
         # Save model checkpoint
-        if iteration % 250 == 0:
+        if iteration % 100 == 0:
             torch.save({
                 'iteration': iteration,
                 'model_state_dict': agent.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'args': args,
-            }, f"models/{run_name}_iter_{iteration}.pt")
+            }, f"models/{args.run_name}_iter_{iteration}.pt")
             if args.track:
-                wandb.save(f"models/{run_name}_iter_{iteration}.pt")
-        
+                wandb.save(f"models/{args.run_name}_iter_{iteration}.pt")
+
 
     if args.profile_path is not None:
         profiler.stop()
@@ -615,9 +631,9 @@ if __name__ == "__main__":
         'model_state_dict': agent.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'args': args,
-    }, f"models/{run_name}_final.pt")
+    }, f"models/{args.run_name}_final.pt")
     if args.track:
-        wandb.save(f"models/{run_name}_final.pt")
+        wandb.save(f"models/{args.run_name}_final.pt")
 
 
     envs.close()
@@ -631,4 +647,4 @@ if __name__ == "__main__":
 
     print(f"\nTraining completed!")
     print(f"Final win rate: {np.mean(win_rate[-100:]) if len(win_rate) >= 100 else 0.0:.3f}")
-    print(f"Model saved as: models/{run_name}_final.pt")
+    print(f"Model saved as: models/{args.run_name}_final.pt")
