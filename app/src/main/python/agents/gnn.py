@@ -4,9 +4,11 @@ import torch.nn.functional as F
 from torch.distributions import Normal, Categorical
 from torch_geometric.nn import GCNConv, GATConv, global_mean_pool, global_max_pool, GATv2Conv, ResGatedGraphConv
 from torch_geometric.nn import Sequential as PyGSequential
+from torch_geometric.nn.norm import MeanSubtractionNorm
 from torch_geometric.data import Data, Batch
 from typing import Tuple, Union, List
 from gym_utils.gym_wrapper import owner_one_hot_encoding
+from gym_utils.distributions import MaskedCategorical, SigmoidTransformedDistribution
 
 import numpy as np
 from gymnasium.spaces import GraphInstance
@@ -58,34 +60,40 @@ class PlanetWarsAgentGNN(nn.Module):
         # self.conv3 = GCNConv(128, 64)
         
         # Graph Attention Network layers (edge features)
-        # self.a_gnn = PyGSequential('x, edge_index, edge_attr', [
+        # self.a_gnn = PyGSequential('x, edge_index, edge_attr, batch', [
         #     (layer_init_gat(GATv2Conv(self.node_feature_dim, self.hidden_dim, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+        #     (MeanSubtractionNorm(), 'x, batch -> x'),
         #     nn.ReLU(),
-        #     (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
-        #     nn.ReLU(),
+        #     # (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+        #     # (MeanSubtractionNorm(), 'x, batch -> x'),
+        #     # nn.ReLU(),
         #     (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=1, concat=False, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
         # ])
 
-        self.v_gnn = PyGSequential('x, edge_index, edge_attr', [
+        self.v_gnn = PyGSequential('x, edge_index, edge_attr, batch', [
             (layer_init_gat(GATv2Conv(self.node_feature_dim, self.hidden_dim, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+            (MeanSubtractionNorm(), 'x, batch -> x'),
             nn.ReLU(),
             # (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+            # (MeanSubtractionNorm(), 'x, batch -> x'),
             # nn.ReLU(),
-            (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=1, concat=False, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+            (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=1, concat=False, edge_dim=5)), 'x, edge_index, edge_attr  -> x'),
         ])
 
         #Residual Gated Graph Conv layers
-        # self.v_gnn = PyGSequential('x, edge_index, edge_attr', [
+        # self.v_gnn = PyGSequential('x, edge_index, edge_attr, batch', [
         #     (ResGatedGraphConv(self.node_feature_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
         #     nn.ReLU(),
         #     (ResGatedGraphConv(self.hidden_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
         #     nn.ReLU(),
         #     (ResGatedGraphConv(self.hidden_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
         # ])
-        self.a_gnn = PyGSequential('x, edge_index, edge_attr', [
+        self.a_gnn = PyGSequential('x, edge_index, edge_attr, batch', [
             (ResGatedGraphConv(self.node_feature_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
+            (MeanSubtractionNorm(), 'x, batch -> x'),
             nn.ReLU(),
             (ResGatedGraphConv(self.hidden_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
+            (MeanSubtractionNorm(), 'x, batch -> x'),
             nn.ReLU(),
             (ResGatedGraphConv(self.hidden_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
         ])
@@ -161,7 +169,7 @@ class PlanetWarsAgentGNN(nn.Module):
     def forward_gnn(self, x, edge_index, edge_attr, batch=None):
         """Forward pass through GNN layers"""
         # GNN forward pass
-        h = self.a_gnn(x, edge_index, edge_attr)
+        h = self.a_gnn(x, edge_index, edge_attr, batch)
 
         # Per-node features
         # node_features = self.node_mlp(h)
@@ -181,7 +189,7 @@ class PlanetWarsAgentGNN(nn.Module):
     def forward_value_gnn(self, x, edge_index, edge_attr, batch=None):
         """Forward pass through GNN layers for value estimation"""
         # GNN forward pass
-        h = self.v_gnn(x, edge_index, edge_attr)
+        h = self.v_gnn(x, edge_index, edge_attr, batch)
 
         # Global features
         if batch is None:
@@ -306,30 +314,18 @@ class PlanetWarsAgentGNN(nn.Module):
             if self.args.discretized_ratio_bins == 0:
                 ratio_mean = self.ratio_actor_mean(ratio_input)
                 ratio_std = self.ratio_actor_logstd.exp()
-                ratio_probs = Normal(ratio_mean, ratio_std)
+                ratio_std = torch.clamp(ratio_std, max=10.0)  # Clamp to avoid extreme values
+                ratio_probs = SigmoidTransformedDistribution(ratio_mean, ratio_std)
             else:
                 ratio_probs = Categorical(logits=self.ratio_actor(ratio_input))
                 
             if self.args.discretized_ratio_bins == 0:
                 if action is None:
-                    raw_ratio = ratio_probs.sample()
-                    ratio_action[valid_action_idx] = torch.sigmoid(raw_ratio) / 2 + 0.5
-                    # Log prob calculation
-                    ratio_logprob_raw = ratio_probs.log_prob(raw_ratio).squeeze(-1)
-                    # Jacobian correction
-                    jacobian = torch.sigmoid(raw_ratio) * (1 - torch.sigmoid(raw_ratio)) / 2
-                    ratio_logprob[valid_action_idx] = ratio_logprob_raw #- torch.log(jacobian).squeeze(-1) 
-                    # According to https://openreview.net/forum?id=nIAxjsniDzg it does not affect policy loss or KL but it does affect entropy
+                    ratio_sample = ratio_probs.sample()
+                    ratio_action[valid_action_idx] = ratio_sample
+                    ratio_logprob[valid_action_idx] = ratio_probs.log_prob(ratio_sample).squeeze(-1)
                 else:
-                    # Inverse transform provided action back to raw space
-                    transformed_ratio = (ratio_action[valid_action_idx] - 0.5) * 2  # [0,1] range
-                    raw_ratio_action = torch.logit(torch.clamp(transformed_ratio, 1e-6, 1-1e-6))  # Avoid inf
-                    # Calculate log prob in raw space
-                    ratio_logprob_raw = ratio_probs.log_prob(raw_ratio_action).squeeze(-1)
-                    # Jacobian correction
-                    jacobian = torch.sigmoid(raw_ratio_action) * (1 - torch.sigmoid(raw_ratio_action)) / 2
-                    ratio_logprob[valid_action_idx] = ratio_logprob_raw #- torch.log(jacobian).squeeze(-1) 
-                    # According to https://openreview.net/forum?id=nIAxjsniDzg it does not affect policy loss or KL but it does affect entropy
+                    ratio_logprob[valid_action_idx] = ratio_probs.log_prob(ratio_action[valid_action_idx]).squeeze(-1)
             
             if self.args.discretized_ratio_bins > 0:
                 if action is None:
@@ -343,11 +339,7 @@ class PlanetWarsAgentGNN(nn.Module):
 
             target_entropy[valid_action_idx] = target_probs.entropy() 
             target_logprob[valid_action_idx] = target_probs.log_prob(valid_target_action)
-            if self.args.discretized_ratio_bins == 0:
-                # Add log(jacobian) to entropy to match https://openreview.net/forum?id=nIAxjsniDzg
-                ratio_entropy[valid_action_idx] = ratio_probs.entropy().squeeze(-1) + torch.log(jacobian).squeeze(-1)
-            else:
-                ratio_entropy[valid_action_idx] = ratio_probs.entropy().squeeze(-1)
+            ratio_entropy[valid_action_idx] = ratio_probs.entropy().squeeze(-1)
 
 
         action = torch.stack([
@@ -363,7 +355,7 @@ class PlanetWarsAgentGNN(nn.Module):
         total_logprob = source_logprob + target_logprob + ratio_logprob
         
         # Combined entropy
-        total_entropy = source_probs.entropy() + target_entropy + 10*ratio_entropy #According to cleanrl, entropy does not help in continuous actions
+        total_entropy = source_probs.entropy() + target_entropy + ratio_entropy #According to cleanrl, entropy does not help in continuous actions
         
         return action, total_logprob, total_entropy, value
 
@@ -411,7 +403,7 @@ class PlanetWarsAgentGNN(nn.Module):
             valid_action_idx = source_action != 0
             if valid_action_idx.any():
                 # Get target logits for valid actions
-                source_features = node_features[source_action[valid_action_idx]-1].unsqueeze(1).expand(num_planets, -1)  # [batches with valid actions, num_planets, node_feature_dim]
+                source_features = node_features[source_action[valid_action_idx]-1].expand(num_planets, -1)  # [batches with valid actions, num_planets, node_feature_dim]
                 target_features = torch.cat((source_features, node_features), dim=-1)
                 target_logits = self.target_actor(target_features).squeeze(-1).unsqueeze(0)  # [1, num_planets]
 
@@ -458,28 +450,6 @@ class PlanetWarsAgentGNN(nn.Module):
         new_agent.player_id = 3 - self.player_id
         return new_agent
 
-class MaskedCategorical(Categorical):
-    """Categorical distribution with action masking"""
-    
-    def __init__(self, logits=None, probs=None, mask=None):
-        if mask is not None:
-            # Set logits of invalid actions to very negative values
-            if logits is not None:
-                logits = torch.where(mask.bool(), logits, torch.tensor(-1e8, device=logits.device))
-            elif probs is not None:
-                probs = torch.where(mask.bool(), probs, torch.tensor(1e-8, device=probs.device))
-        
-        super().__init__(logits=logits, probs=probs)
-        self.mask = mask
-    
-    def entropy(self):
-        # Only calculate entropy for valid actions
-        if self.mask is not None:
-            # Get probabilities and zero out invalid actions
-            p_log_p = self.logits * self.probs
-            p_log_p = torch.where(self.mask.bool(), p_log_p, torch.tensor(0.0, device=p_log_p.device))
-            return -p_log_p.sum(-1)
-        return super().entropy()
 
 
 # Example usage showing how to integrate with the gym environment

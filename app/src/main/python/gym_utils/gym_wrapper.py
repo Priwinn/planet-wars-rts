@@ -42,10 +42,10 @@ def tensor_to_action(tensor: torch.Tensor, player_id: Player) -> Action:
         num_ships=num_ships
         )
 
-def are_there_valid_actions(game_state: Dict[str, Any], player_id: Player) -> bool:
+def are_there_valid_actions(game_state: Dict[str, Any], player_id: int) -> bool:
     """Check if there are any valid actions for the given player in the current game state."""
     for planet in game_state['planets']:
-        if planet['owner'] == player_id and planet['transporter'] is not None:
+        if planet['owner'] == player_id and planet['transporter'] is None:
             return True
     return False
 
@@ -170,6 +170,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
         actions[self.opponent_player] = opponent_action
         
         # Step the forward model
+        valid_actions_bool = are_there_valid_actions(self.kotlin_bridge.get_game_state(), self.player_int)
         game_state = self.kotlin_bridge.step(actions)
         
         # Calculate reward based on current state
@@ -182,8 +183,8 @@ class PlanetWarsForwardModelEnv(gym.Env):
         truncated = game_state['tick'] >= self.max_ticks and not game_state['isTerminal']
 
         # Penalize for no-op actions if there is a planet to send ships from
-        if controlled_action.source_planet_id == -1 and are_there_valid_actions(game_state, self.controlled_player):
-            reward -= 2
+        if controlled_action.source_planet_id == -1 and valid_actions_bool:
+            reward -= 1
 
         # Additional info
         info = {

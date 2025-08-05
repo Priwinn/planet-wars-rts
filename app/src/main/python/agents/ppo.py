@@ -56,11 +56,11 @@ class Args:
     """the id of the environment. Filled in runtime, either `PlanetWarsForwardModel` or `PlanetWarsForwardModelGNN` according to agent type"""
     total_timesteps: int = 10000000
     """total timesteps of the experiments"""
-    learning_rate: float = 2.5e-4
+    learning_rate: float = 1e-3
     """the learning rate of the optimizer"""
-    num_envs: int = 1
+    num_envs: int = 12
     """the number of parallel game environments"""
-    num_steps: int = 4096
+    num_steps: int = 512
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
@@ -70,7 +70,7 @@ class Args:
     """the lambda for the general advantage estimation"""
     num_minibatches: int = 4
     """the number of mini-batches"""
-    update_epochs: int = 4
+    update_epochs: int = 10
     """the K epochs to update the policy"""
     norm_adv: bool = True
     """Toggles advantages normalization"""
@@ -84,7 +84,7 @@ class Args:
     """coefficient of the value function"""
     max_grad_norm: float = 3.5
     """the maximum norm for the gradient clipping"""
-    target_kl: float = None
+    target_kl: float = 0.01
     """the target KL divergence threshold"""
 
     # Planet Wars specific
@@ -99,9 +99,9 @@ class Args:
     """whether to include adjacency matrix in observations"""
     flatten_observation: bool = True
     """Filled on run time, mlp uses flattened observation, gnn uses graph observation"""
-    discretized_ratio_bins: int = 11
+    discretized_ratio_bins: int = 0
     """number of bins for the discretized ratio actor. Set to 0 to disable discretization"""
-    new_map_each_run: bool = False
+    new_map_each_run: bool = True
     """whether to create a new map for each run or use the same map"""
     hidden_dim: int = 256
     """hidden dimension for the layers"""
@@ -504,6 +504,7 @@ if __name__ == "__main__":
         # Optimizing the policy and value network
         b_inds = np.arange(args.batch_size)
         clipfracs = []
+        # with torch.autograd.detect_anomaly():
         for epoch in range(args.update_epochs):
             np.random.shuffle(b_inds)
             for start in range(0, args.batch_size, args.minibatch_size):
@@ -607,7 +608,7 @@ if __name__ == "__main__":
         sys.stdout.flush()
 
         # Save model checkpoint
-        if iteration % 100 == 0:
+        if iteration % 50 == 0:
             torch.save({
                 'iteration': iteration,
                 'model_state_dict': agent.state_dict(),
