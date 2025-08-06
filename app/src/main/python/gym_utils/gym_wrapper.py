@@ -9,6 +9,7 @@ from agents.baseline_policies import RandomPolicy, GreedyPolicy
 
 from gym_utils.self_play import SelfPlayBase
 from gym_utils.KotlinForwardModelBridge import KotlinForwardModelBridge
+from gym_utils.PythonForwardModelBridge import PythonForwardModelBridge
 from torch_geometric.data import Data
 from core.game_state import Player, Action
 
@@ -71,8 +72,10 @@ class PlanetWarsForwardModelEnv(gym.Env):
     ):
         super().__init__()
         self.args = args
-        
-        self.kotlin_bridge = KotlinForwardModelBridge(jar_path=jar_path)
+        if jar_path is None:
+            self.bridge = PythonForwardModelBridge()
+        else:
+            self.bridge = KotlinForwardModelBridge(jar_path=jar_path)
         self.max_distance_threshold = max_distance_threshold
         self.distance_power = distance_power
         self.normalize_weights = normalize_weights
@@ -94,8 +97,8 @@ class PlanetWarsForwardModelEnv(gym.Env):
         self.opponent_int = 1 if opponent_player == Player.Player1 else 2
         
         # Get initial state to number of planets
-        self.kotlin_bridge.create_new_game(self.game_params)
-        initial_state = self.kotlin_bridge.get_game_state()
+        self.bridge.create_new_game(self.game_params)
+        initial_state = self.bridge.get_game_state()
         self.num_planets = len(initial_state['planets'])
         self.edge_index = torch.Tensor([[i, j] for i in range(self.num_planets) for j in range(self.num_planets) if i != j]).long().permute(1, 0)
         
@@ -135,8 +138,8 @@ class PlanetWarsForwardModelEnv(gym.Env):
 
     def reset(self, **kwargs) -> Tuple[Data, Dict[str, Any]]:
         """Reset the environment and return initial observation"""
-        self.kotlin_bridge.create_new_game(self.game_params)
-        initial_state = self.kotlin_bridge.get_game_state()
+        self.bridge.create_new_game(self.game_params)
+        initial_state = self.bridge.get_game_state()
         
         obs = self._get_observation()
 
@@ -163,7 +166,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
             opponent_action = self.opponent_policy.get_action(self._get_observation().to(device=device))
             opponent_action = tensor_to_action(opponent_action, self.opponent_player)
         elif callable(self.opponent_policy):
-            current_state = self.kotlin_bridge.get_game_state()
+            current_state = self.bridge.get_game_state()
             opponent_action = self.opponent_policy(current_state)
         
 
@@ -173,8 +176,8 @@ class PlanetWarsForwardModelEnv(gym.Env):
         actions[self.opponent_player] = opponent_action
         
         # Step the forward model
-        valid_actions_bool = are_there_valid_actions(self.kotlin_bridge.get_game_state(), self.player_int)
-        game_state = self.kotlin_bridge.step(actions)
+        valid_actions_bool = are_there_valid_actions(self.bridge.get_game_state(), self.player_int)
+        game_state = self.bridge.step(actions)
         
         # Calculate reward based on current state
         reward = self._calculate_reward(game_state)
@@ -218,7 +221,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
             source_planet -= 1  # -1 to account for no-op action
         
         # Get current game state to check planet ownership and ships
-        current_state = self.kotlin_bridge.get_game_state()
+        current_state = self.bridge.get_game_state()
         planets = current_state['planets']
         
         # Validate source planet
@@ -254,7 +257,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
     
     def _get_observation(self) -> Data:
         """Create graph observation from current game state"""
-        game_state = self.kotlin_bridge.get_game_state()
+        game_state = self.bridge.get_game_state()
         planets = game_state['planets']
         node_features = torch.Tensor(np.stack([self._get_planet_features(p) for p in planets], axis=0))
         
@@ -437,7 +440,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
     def render(self, mode='human') -> Optional[np.ndarray]:
         """Render the environment"""
         if mode == 'human':
-            game_state = self.kotlin_bridge.get_game_state()
+            game_state = self.bridge.get_game_state()
             print(f"Tick: {game_state['tick']}")
             print(f"Terminal: {game_state['isTerminal']}")
             print(f"Controlled Player: {self.player_int}")
@@ -463,7 +466,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
     
     def close(self):
         """Clean up resources"""
-        self.kotlin_bridge.cleanup()
+        self.bridge.cleanup()
 
     def set_opponent_policy(self, policy_func):
         """Set a custom opponent policy function"""
@@ -483,8 +486,8 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
         if self.args.num_planets is None:
             self.game_params['numPlanets'] = np.random.randint(self.args.num_planets_min, self.args.num_planets_max + 1)
 
-        self.kotlin_bridge.create_new_game(self.game_params)
-        initial_state = self.kotlin_bridge.get_game_state()
+        self.bridge.create_new_game(self.game_params)
+        initial_state = self.bridge.get_game_state()
         self.num_planets = len(initial_state['planets'])
         if self.args.num_planets is None:
             self.edge_index = torch.Tensor([[i, j] for i in range(self.num_planets) for j in range(self.num_planets) if i != j]).long().permute(1, 0)
@@ -513,7 +516,7 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
             self.edge_attr = torch.Tensor(np.stack(
                 [self._get_default_edge_features(edge[0], edge[1]) for edge in self.edge_index.permute(1, 0).numpy()]
             ))
-        game_state = self.kotlin_bridge.get_game_state()
+        game_state = self.bridge.get_game_state()
         planets = game_state['planets']
         node_features = torch.Tensor(np.stack([self._get_planet_features(p) for p in planets], axis=0))
 
@@ -558,7 +561,7 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
         return np.array([0.0,0.0, weight], dtype=np.float32)
     def _get_planet_by_id(self, planet_id: int) -> Dict[str, Any]:
         """Get planet data by ID"""
-        game_state = self.kotlin_bridge.get_game_state()
+        game_state = self.bridge.get_game_state()
         for planet in game_state['planets']:
             if planet['id'] == planet_id:
                 return planet

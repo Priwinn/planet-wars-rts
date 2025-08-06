@@ -116,12 +116,17 @@ class ForwardModel:
 
 if __name__ == "__main__":
     from core.game_state_factory import GameStateFactory
+    from time import time
+    
 
     params = GameParams()
     state = GameStateFactory(params).create_game()
     model = ForwardModel(state, params)
-
+    start_time = time()
     for _ in range(1000):
         model.step({})  # simulate empty action dicts
 
     print(f"Steps: {ForwardModel.n_updates}")
+    end_time = time()
+    print(f"Time taken: {end_time - start_time} seconds")
+    print(f'Steps per second: {ForwardModel.n_updates / (end_time - start_time)}')

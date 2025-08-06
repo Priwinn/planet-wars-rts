@@ -340,7 +340,7 @@ if __name__ == "__main__":
     print("\nSimulating game steps...")
     current_state = initial_state
     start_time = time.time()
-    for step in range(20):
+    for step in range(1000):
         # Create some actions based on current state
         actions = {}
         
@@ -389,7 +389,7 @@ if __name__ == "__main__":
     
     # Test performance
     end_time = time.time()
-    steps_per_second = 20 / (end_time - start_time)
+    steps_per_second = 1000 / (end_time - start_time)
     print(f"Performance: {steps_per_second:.1f} steps/second")
 
     bridge.cleanup()
