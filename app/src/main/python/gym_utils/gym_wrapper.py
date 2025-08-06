@@ -56,6 +56,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
     
     def __init__(
         self,
+        args,
         jar_path: str = None,
         max_distance_threshold: float = None,
         distance_power: float = 1.0,
@@ -66,8 +67,10 @@ class PlanetWarsForwardModelEnv(gym.Env):
         game_params: Optional[Dict[str, Any]] = None,
         opponent_policy: Optional[callable] = None,  # Function that takes game_state and returns Action
         self_play: Optional[SelfPlayBase] = None  # Function for self-play, if needed
+
     ):
         super().__init__()
+        self.args = args
         
         self.kotlin_bridge = KotlinForwardModelBridge(jar_path=jar_path)
         self.max_distance_threshold = max_distance_threshold
@@ -79,8 +82,6 @@ class PlanetWarsForwardModelEnv(gym.Env):
         self.opponent_policy = opponent_policy or RandomPolicy(game_params, opponent_player)
         self.self_play = self_play
         self.previous_score = 0.0
-        self.edge_index = torch.Tensor([[i, j] for i in range(game_params['numPlanets']) for j in range(game_params['numPlanets']) if i != j]).long().permute(1, 0)
-        
         self.game_params = game_params or {
             'maxTicks': 500,
             'numPlanets': 10,
@@ -92,10 +93,12 @@ class PlanetWarsForwardModelEnv(gym.Env):
         self.player_int = 1 if controlled_player == Player.Player1 else 2
         self.opponent_int = 1 if opponent_player == Player.Player1 else 2
         
-        # Get initial state to determine action/observation spaces
+        # Get initial state to number of planets
         self.kotlin_bridge.create_new_game(self.game_params)
         initial_state = self.kotlin_bridge.get_game_state()
         self.num_planets = len(initial_state['planets'])
+        self.edge_index = torch.Tensor([[i, j] for i in range(self.num_planets) for j in range(self.num_planets) if i != j]).long().permute(1, 0)
+        
         
         # Define action and observation spaces
         self.action_space = self._create_action_space()
@@ -475,13 +478,25 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
 
     def reset(self, **kwargs) -> Tuple[Data, Dict[str, Any]]:
         """Reset the environment and return initial observation"""
+
+        # If num_planets is None, generate a random number of planets
+        if self.args.num_planets is None:
+            self.game_params['numPlanets'] = np.random.randint(self.args.num_planets_min, self.args.num_planets_max + 1)
+
         self.kotlin_bridge.create_new_game(self.game_params)
         initial_state = self.kotlin_bridge.get_game_state()
+        self.num_planets = len(initial_state['planets'])
+        if self.args.num_planets is None:
+            self.edge_index = torch.Tensor([[i, j] for i in range(self.num_planets) for j in range(self.num_planets) if i != j]).long().permute(1, 0)
+        print(f"Number of planets: {self.num_planets}")
         # Reset edge attributes based on new game state if newMapEachRun is True
         if self.game_params.get('newMapEachRun', True) or self.edge_attr is None:
             self.edge_attr = torch.Tensor(np.stack(
                 [self._get_default_edge_features(edge[0], edge[1]) for edge in self.edge_index.permute(1, 0).numpy()]
             ))
+        
+
+
         obs = self._get_observation()
         if self.self_play:
             self.opponent_policy = self.self_play.get_opponent()
@@ -522,6 +537,7 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
             planet['owner'],  # Owner ID
             planet['numShips']/10,  # Number of ships
             planet['growthRate']*10,  # Growth rate
+            1.0 if planet['transporter'] is not None else 0.0  # Has transporter
         ])
         return features
     def _get_transporter_features(self, planet) -> torch.Tensor:
@@ -546,13 +562,13 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
         for planet in game_state['planets']:
             if planet['id'] == planet_id:
                 return planet
-        return None
+        raise ValueError(f"Planet with ID {planet_id} not found in game state")
     def _get_edge_index(self,i,j) -> int:
         """Get edge index for graph representation. Considers no self-loops are present."""
         if j>i:
-            return i * (self.game_params['numPlanets']-1) + j-1
+            return i * (self.num_planets-1) + j-1
         elif j<i:
-            return i * (self.game_params['numPlanets']-1) + j
+            return i * (self.num_planets-1) + j
         else:
             raise ValueError("No self-loops allowed")
 

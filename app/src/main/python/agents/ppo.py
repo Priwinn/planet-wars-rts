@@ -1,4 +1,5 @@
 import os
+# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 import random
 import shutil
 import time
@@ -56,7 +57,7 @@ class Args:
     """the id of the environment. Filled in runtime, either `PlanetWarsForwardModel` or `PlanetWarsForwardModelGNN` according to agent type"""
     total_timesteps: int = 10000000
     """total timesteps of the experiments"""
-    learning_rate: float = 1e-3
+    learning_rate: float = 2e-3
     """the learning rate of the optimizer"""
     num_envs: int = 12
     """the number of parallel game environments"""
@@ -70,7 +71,7 @@ class Args:
     """the lambda for the general advantage estimation"""
     num_minibatches: int = 4
     """the number of mini-batches"""
-    update_epochs: int = 10
+    update_epochs: int = 4
     """the K epochs to update the policy"""
     norm_adv: bool = True
     """Toggles advantages normalization"""
@@ -89,8 +90,12 @@ class Args:
 
     # Planet Wars specific
     agent_type: str = "gnn"  # "mlp" or "gnn"
-    num_planets: int = 20
-    """number of planets in the game"""
+    num_planets: int = None
+    """number of planets in the game. If None, will be set to a random value between num_planets_min and num_planets_max (new_map_each_run needs to be set to true)"""
+    num_planets_min: int = 10
+    """minimum number of planets in the game"""
+    num_planets_max: int = 30
+    """maximum number of planets in the game"""
     node_feature_dim: int = 0 #Filled in runtime 5 for gnn, 14 for mlp
     """dimension of node features (owner, ship_count, growth_rate, x, y)"""
     max_ticks: int = 2000
@@ -133,6 +138,7 @@ def make_env(env_id, idx, capture_video, run_name, device, args):
 
         if env_id == "PlanetWarsForwardModel":
             env = PlanetWarsForwardModelEnv(
+                args,
                 controlled_player=Player.Player1,
                 opponent_player=Player.Player2,
                 max_ticks=args.max_ticks,
@@ -146,12 +152,18 @@ def make_env(env_id, idx, capture_video, run_name, device, args):
                 }
             )
         elif env_id == "PlanetWarsForwardModelGNN":
+            if args.num_planets is None:
+                num_planets = np.random.randint(args.num_planets_min, args.num_planets_max + 1)
+            else:
+                num_planets = args.num_planets
+
             env = PlanetWarsForwardModelGNNEnv(
+                args,
                 controlled_player=Player.Player1,
                 opponent_player=Player.Player2,
                 max_ticks=args.max_ticks,
                 game_params={
-                    'numPlanets': args.num_planets,
+                    'numPlanets': num_planets,
                     'maxTicks': args.max_ticks,
                     'transporterSpeed': 3.0,
                     'width': 640,
@@ -168,7 +180,7 @@ def make_env(env_id, idx, capture_video, run_name, device, args):
         elif args.opponent_type == "defensive":
             env.set_opponent_policy(DefensivePolicy(game_params=env.game_params, player=Player.Player2))
 
-        env = PlanetWarsActionWrapper(env, args.num_planets, args.use_adjacency_matrix, args.flatten_observation, device, node_feature_dim=args.node_feature_dim)
+        env = PlanetWarsActionWrapper(env, num_planets, args.use_adjacency_matrix, args.flatten_observation, device, node_feature_dim=args.node_feature_dim)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.NormalizeReward(env)
         return env
@@ -195,7 +207,7 @@ class PlanetWarsActionWrapper(gym.Wrapper):
         # Action space: source_planet (discrete) + target_planet (discrete) + ship_ratio (continuous)
         self.action_space = gym.spaces.Box(
                 low=np.array([0, 0, 0.0]),
-                high=np.array([num_planets-1, num_planets-1, 1.0]),
+                high=np.array([args.num_planets_max-1, args.num_planets_max-1, 1.0]),
                 dtype=np.float32
             )
         if flatten_observation:
@@ -234,22 +246,6 @@ class PlanetWarsActionWrapper(gym.Wrapper):
         if self.flatten_observation:
             obs = obs.x
         return obs, info
-    
-    # def _flatten_observation(self, obs):
-    #     """Flatten the graph observation to a 1D array"""
-    #     if hasattr(obs, 'x') and hasattr(obs, 'edge_attr'):
-    #         # GraphObservation object
-    #         node_features_flat = obs.x.flatten()
-            
-    #         if self.use_adjacency_matrix:
-    #             adj_matrix_flat = obs.adjacency_matrix.flatten()
-    #             return np.concatenate([node_features_flat, adj_matrix_flat]).astype(np.float32)
-    #         else:
-    #             return node_features_flat
-                
-
-    
-
 
 if __name__ == "__main__":
     
@@ -259,7 +255,7 @@ if __name__ == "__main__":
     args.num_iterations = args.total_timesteps // args.batch_size
     args.flatten_observation = args.agent_type != "gnn"
     args.env_id = "PlanetWarsForwardModelGNN" if args.agent_type == "gnn" else "PlanetWarsForwardModel"
-    args.node_feature_dim = 3 if args.agent_type == "gnn" else 10
+    args.node_feature_dim = 4 if args.agent_type == "gnn" else 10
     args.run_name = f"{args.env_id}__{args.exp_name}__{args.opponent_type}__{int(time.time())}"
 
     if args.use_async:
@@ -327,10 +323,10 @@ if __name__ == "__main__":
     if args.flatten_observation:
         obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
     else:
-        obs = [[PyGData(x=torch.zeros((args.num_planets, args.node_feature_dim), dtype=torch.float32),
-                             edge_index=torch.zeros((2, args.num_planets * (args.num_planets-1)), dtype=torch.int64)
-                             ) 
-                             for _ in range(args.num_envs)] for _ in range(args.num_steps)]
+        obs = [[PyGData(x=torch.zeros((0, args.node_feature_dim), dtype=torch.float32),
+                       edge_index=torch.zeros(2, 0), dtype=torch.int64)
+                for _ in range(args.num_envs)]
+                for _ in range(args.num_steps)]
 
     actions = torch.zeros((args.num_steps, args.num_envs, 3)).to(device) 
     logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
@@ -356,10 +352,6 @@ if __name__ == "__main__":
     episode_lengths = []
     win_rate = []
     os.makedirs("models", exist_ok=True)
-    
-    print(f"Training with adjacency matrix: {args.use_adjacency_matrix}")
-    print(f"Observation shape: {envs.single_observation_space.shape}")
-    print(f"Network input size: {args.num_planets * args.node_feature_dim + (args.num_planets * args.num_planets if args.use_adjacency_matrix else 0)}")
     
     for iteration in range(1, args.num_iterations + 1):
         # Annealing the rate if instructed to do so
@@ -585,15 +577,16 @@ if __name__ == "__main__":
         is_op = b_actions[:, 0] != 0
         ratio_mean = (b_actions[is_op, 2].mean() if b_actions.shape[1] > 2 else 0.0)
         ratio_std = (b_actions[is_op, 2].std() if b_actions.shape[1] > 2 else 0.0)
-        source_counts = torch.bincount(b_actions[:, 0].long(), minlength=args.num_planets+1)
-        target_counts = torch.bincount(b_actions[is_op, 1].long(), minlength=args.num_planets)
+        source_counts = torch.bincount(b_actions[:, 0].long(), minlength=args.num_planets_max+1)
+        target_counts = torch.bincount(b_actions[is_op, 1].long(), minlength=args.num_planets_max+1)
         source_freq = source_counts.float() / (args.batch_size-source_counts[0].float())  # Exclude no-op action
         target_freq = target_counts.float() / args.batch_size
 
         writer.add_scalar("action_stats/mean_action_ratio", ratio_mean, global_step)
         writer.add_scalar("action_stats/std_action_ratio", ratio_std, global_step)
         writer.add_scalar("action_stats/source_noop_freq", source_counts[0].float()/args.batch_size, global_step)
-        for i in range(args.num_planets):
+        #This probably doesn't make sense if num_planets is not fixed
+        for i in range(args.num_planets_max):
             writer.add_scalar(f"action_stats/source_planet_{i}_freq", source_freq[i+1].item(), global_step)
             writer.add_scalar(f"action_stats/target_planet_{i}_freq", target_freq[i].item(), global_step)
 
@@ -608,7 +601,7 @@ if __name__ == "__main__":
         sys.stdout.flush()
 
         # Save model checkpoint
-        if iteration % 50 == 0:
+        if iteration % 100 == 0:
             torch.save({
                 'iteration': iteration,
                 'model_state_dict': agent.state_dict(),
