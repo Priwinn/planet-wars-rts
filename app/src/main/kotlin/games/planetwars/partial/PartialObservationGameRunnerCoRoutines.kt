@@ -1,20 +1,19 @@
-package games.planetwars.runners
+package games.planetwars.partial
 
-
+import competition_entry.CarefulPartialAgent
 import games.planetwars.agents.Action
-import games.planetwars.agents.PlanetWarsAgent
-import games.planetwars.agents.random.PureRandomAgent
-import games.planetwars.agents.random.SlowRandomAgent
+import games.planetwars.agents.PartialObservationAgent
+import games.planetwars.agents.PartialRemoteAgent
+import games.planetwars.agents.RemotePartialObservationAgent
 import games.planetwars.core.*
 import kotlinx.coroutines.*
 import kotlin.system.measureTimeMillis
 
-data class GameRunnerCoRoutines(
-    val agent1: PlanetWarsAgent,
-    val agent2: PlanetWarsAgent,
+data class PartialObservationGameRunnerCoRoutines(
+    val agent1: RemotePartialObservationAgent,
+    val agent2: RemotePartialObservationAgent,
     val gameParams: GameParams,
     val timeoutMillis: Long = 500, // Timeout for agent responses
-    val debug: Boolean = false
 ) {
     var gameState: GameState = GameStateFactory(gameParams).createGame()
     var forwardModel: ForwardModel = ForwardModel(gameState.deepCopy(), gameParams)
@@ -27,8 +26,8 @@ data class GameRunnerCoRoutines(
         if (gameParams.newMapEachRun) {
             gameState = GameStateFactory(gameParams).createGame()
         }
-        agent1.prepareToPlayAs(Player.Player1, gameParams)
-        agent2.prepareToPlayAs(Player.Player2, gameParams)
+        agent1.prepareToPlayAs(Player.Player1, gameParams, )
+        agent2.prepareToPlayAs(Player.Player2, gameParams, )
         forwardModel = ForwardModel(gameState.deepCopy(), gameParams)
         runBlocking {
             while (!forwardModel.isTerminal()) {
@@ -48,12 +47,14 @@ data class GameRunnerCoRoutines(
 
         try {
             val action1 = scope.async(Dispatchers.Default) {
-                latestAction1 = agent1.getAction(state.deepCopy()) // Runs in a background thread
+                val obs1 = ObservationFactory.create(gameState, setOf(Player.Player1))
+                latestAction1 = agent1.getAction(obs1) // Runs in a background thread
                 latestAction1
             }
 
             val action2 = scope.async(Dispatchers.Default) {
-                latestAction2 = agent2.getAction(state.deepCopy()) // Runs in a background thread
+                val obs2 = ObservationFactory.create(gameState, setOf(Player.Player2))
+                latestAction1 = agent2.getAction(obs2) // Runs in a background thread
                 latestAction2
             }
 
@@ -73,9 +74,6 @@ data class GameRunnerCoRoutines(
 
     fun newGame() {
         forwardModel = ForwardModel(gameState.deepCopy(), gameParams)
-
-        agent1.prepareToPlayAs(Player.Player1, gameParams)
-        agent2.prepareToPlayAs(Player.Player2, gameParams)
     }
 
     fun stepGame(): ForwardModel {
@@ -84,7 +82,6 @@ data class GameRunnerCoRoutines(
         }
         runBlocking {
             val actions = getTimedActions(forwardModel.state)
-            if (debug) println("Actions: ${actions[Player.Player1]}, ${actions[Player.Player2]}")
             forwardModel.step(actions)
         }
         return forwardModel
@@ -109,19 +106,28 @@ data class GameRunnerCoRoutines(
 
 
 fun main() {
-    val gameParams = GameParams(numPlanets = 20)
-    val gameState = GameStateFactory(gameParams).createGame()
-    val agent1 = PureRandomAgent()
-//    val agent2 = games.planetwars.agents.BetterRandomAgent()
-//    val agent2 = SlowRandomAgent(delayMillis = 1000)
-    val agent2 = games.planetwars.agents.random.HeavyRandomAgent(delayMillis = 100)
-    val gameRunner = GameRunnerCoRoutines(agent1, agent2, gameParams, timeoutMillis = 1)
+    val gameParams = GameParams(numPlanets = 20, maxTicks = 1000)
+//    val gameState = GameStateFactory(gameParams).createGame()
+    val agent1 = PartialRemoteAgent("<specified by server>", 7080)
+    val agent2 = CarefulPartialAgent()
+    print("Agent 1 type: ${agent1.getAgentType()}\n")
+    print("Agent 2 type: ${agent2.getAgentType()}\n")
+    val gameRunner = PartialObservationGameRunnerCoRoutines(agent1, agent2, gameParams)
     val finalModel = gameRunner.runGame()
     println("Game over!")
     println(finalModel.statusString())
-
     // time to run a bunch of games
-    val nGames = 5
+    val nGames = 1
+    val t = System.currentTimeMillis()
     val results = gameRunner.runGames(nGames)
+    val dt = System.currentTimeMillis() - t
     println(results)
+    println("Time per game: ${dt.toDouble() / nGames} ms")
+    // also print time per step
+    val nSteps = ForwardModel.nUpdates
+    println("Time per step: ${dt.toDouble() / nSteps} ms")
+
+    println("Successful actions: ${ForwardModel.nActions}")
+    println("Failed actions: ${ForwardModel.nFailedActions}")
+
 }

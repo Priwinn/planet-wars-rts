@@ -38,6 +38,26 @@ def process_commit_hash(agent_data: dict) -> dict:
     return new_data
 
 
+import re
+
+def sanitize_image_tag(name: str) -> str:
+    """
+    Sanitizes an arbitrary string to a valid Docker/Podman image tag.
+    Rules:
+    - Lowercase letters, digits, underscore, period, and dash only
+    - Must start and end with alphanumeric characters
+    - Disallowed characters are replaced with a dash
+    - Multiple consecutive non-valid chars collapsed into a single dash
+    """
+    # Lowercase and replace invalid chars with '-'
+    name = name.lower()
+    name = re.sub(r'[^a-z0-9._-]+', '-', name)  # replace invalid chars with '-'
+    name = re.sub(r'-{2,}', '-', name)          # collapse multiple dashes
+    name = name.strip('-._')                    # remove leading/trailing special chars
+    if not name:
+        raise ValueError("Sanitized image tag is empty")
+    return name
+
 def extract_and_normalize_agent_data(issue: dict, github_token: str) -> AgentEntry | None:
     repo = "SimonLucas/planet-wars-rts-submissions"
     issue_number = issue["number"]
@@ -50,9 +70,14 @@ def extract_and_normalize_agent_data(issue: dict, github_token: str) -> AgentEnt
 
     agent_data = process_commit_hash(agent_data)
     agent = AgentEntry(**agent_data)
-    agent.id = agent.id.lower()
+    try:
+        agent.id = sanitize_image_tag(agent.id)
+    except ValueError as e:
+        comment_on_issue(repo, issue_number, f"❌ Invalid agent ID after sanitization: {e}", github_token)
+        return None
 
     return agent
+
 
 
 def clone_and_build_repo(agent: AgentEntry, base_dir: Path, github_token: str, issue_number: int) -> Path | None:
@@ -156,31 +181,47 @@ def stop_and_cleanup_container(agent_id: str, github_token: str, issue_number: i
                      "✅ Evaluation complete. Stopping container.", github_token)
 
 
-def process_issue(issue: dict, base_dir: Path, github_token: str, timeout_seconds: int = 300):
+def process_issue(issue: dict, base_dir: Path, github_token: str, timeout_seconds: int = 300) -> bool:
     issue_number = issue["number"]
 
     # Step 1: Extract agent info
     agent = extract_and_normalize_agent_data(issue, github_token)
     if not agent:
-        return
+        close_issue("SimonLucas/planet-wars-rts-submissions", issue_number, github_token)
+        return False
 
     # Step 2: Clone and build repo
     comment_on_issue("SimonLucas/planet-wars-rts-submissions", issue_number,
                      f"🔍 Processing submission for `{agent.id}`", github_token)
     repo_dir = clone_and_build_repo(agent, base_dir, github_token, issue_number)
     if not repo_dir:
-        return
+        close_issue("SimonLucas/planet-wars-rts-submissions", issue_number, github_token)
+        return False
 
     # Step 3: Launch container
-    port = build_and_launch_container(agent, repo_dir, github_token, issue_number)
+    try:
+        port = build_and_launch_container(agent, repo_dir, github_token, issue_number)
+    except Exception as e:
+        comment_on_issue("SimonLucas/planet-wars-rts-submissions", issue_number,
+                         f"❌ Failed to build and launch container: {e}", github_token)
+        close_issue("SimonLucas/planet-wars-rts-submissions", issue_number, github_token)
+        return False
 
     # Step 4: Run evaluation
     success = run_evaluation(port, github_token, issue_number, timeout_seconds)
 
-    # Step 5: Report results
+    # Step 5: Report results if successful
     if success:
         post_results(github_token, issue_number)
 
     # Step 6: Cleanup
-    stop_and_cleanup_container(agent.id, github_token, issue_number)
+    try:
+        stop_and_cleanup_container(agent.id, github_token, issue_number)
+    except Exception as e:
+        comment_on_issue("SimonLucas/planet-wars-rts-submissions", issue_number,
+                         f"⚠️ Cleanup failed: {e}", github_token)
+
+    # Step 7: Close issue
     close_issue("SimonLucas/planet-wars-rts-submissions", issue_number, github_token)
+
+    return success

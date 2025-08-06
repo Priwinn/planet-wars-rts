@@ -8,7 +8,8 @@ from typing import Optional
 
 
 def run_command(cmd: list[str], cwd: Optional[Path] = None):
-    print(f"🔧 Running: {' '.join(cmd)} (in {cwd or Path.cwd()})")
+    redacted_cmd = [re.sub(r'(https://)([^:@]+)(@github\.com)', r'\1***REDACTED***\3', arg) for arg in cmd]
+    print(f"🔧 Running entry: {' '.join(redacted_cmd)} (in {cwd or Path.cwd()})")
     subprocess.run(cmd, check=True, cwd=cwd)
 
 
@@ -19,13 +20,21 @@ def find_free_port() -> int:
 
 
 def comment_on_issue(repo: str, issue_number: int, comment: str, token: str):
-    url = f"https://api.github.com/repos/{repo}/issues/{issue_number}/comments"
+    url = f"https://api.github.com/repos/{repo}/issues/{issue_number}"
     headers = {
         "Authorization": f"token {token}",
         "Accept": "application/vnd.github+json"
     }
-    print(f"💬 Commenting on issue #{issue_number}: {comment[:60]}...")
-    response = requests.post(url, headers=headers, json={"body": comment})
+
+    # Redact any accidentally included token in the comment string
+    redacted_comment = re.sub(
+        r'(https://)([^:@]+)(@github\.com)',
+        r'\1***REDACTED***\3',
+        comment
+    )
+
+    print(f"💬 Commenting on issue #{issue_number}: {redacted_comment[:60]}...")
+    response = requests.post(url + "/comments", headers=headers, json={"body": redacted_comment})
     response.raise_for_status()
 
 
