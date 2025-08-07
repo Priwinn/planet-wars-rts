@@ -91,7 +91,7 @@ class PythonForwardModelBridge:
             'player1Ships': float(self.forward_model.get_ships(Player.Player1)),
             'player2Ships': float(self.forward_model.get_ships(Player.Player2))
         }
-    
+
     def _convert_player_to_int(self, player: Player) -> int:
         """Convert Player to integer ID"""
         if player == Player.Player1:

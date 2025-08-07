@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import time
 import torch
 from agents.baseline_policies import RandomPolicy, GreedyPolicy
+from agents.planet_wars_agent import PlanetWarsPlayer
 
 from gym_utils.self_play import SelfPlayBase
 from gym_utils.KotlinForwardModelBridge import KotlinForwardModelBridge
@@ -165,11 +166,12 @@ class PlanetWarsForwardModelEnv(gym.Env):
             device = next(self.opponent_policy.parameters()).device  # Same device as opponent, assume it is a PyTorch model
             opponent_action = self.opponent_policy.get_action(self._get_observation().to(device=device))
             opponent_action = tensor_to_action(opponent_action, self.opponent_player)
+        elif isinstance(self.opponent_policy, PlanetWarsPlayer):
+            opponent_action = self.opponent_policy.get_action(self.bridge.game_state)
         elif callable(self.opponent_policy):
             current_state = self.bridge.get_game_state()
             opponent_action = self.opponent_policy(current_state)
-        
-
+            
         # Create actions dict
         actions = {}
         actions[self.controlled_player] = controlled_action
@@ -190,7 +192,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
 
         # Penalize for no-op actions if there is a planet to send ships from
         if controlled_action.source_planet_id == -1 and valid_actions_bool:
-            reward -= 1
+            reward -= 0.1
 
         # Additional info
         info = {
@@ -416,16 +418,11 @@ class PlanetWarsForwardModelEnv(gym.Env):
 
     def _calculate_reward(self, game_state: Dict[str, Any]) -> float:
         """Calculate reward based on game state for the controlled player"""
-        # current_score = self._calculate_normalized_score_delta(game_state)*0.1
-        # current_score = self._calculate_growth_rate(game_state)/ self.game_params['maxTicks']*10
-        # current_score = self._calculate_growth_delta(game_state)*0.1
-        # current_score = self._calculate_ship_delta(game_state)*0.1
-        current_score = self._calculate_change_in_score_delta(game_state)/20
-
-        # Reward is the change in score since last step
-        # reward = current_score - self.previous_score
-        # self.previous_score = current_score
-        reward = current_score
+        # reward = self._calculate_normalized_score_delta(game_state)*0.1
+        # reward = self._calculate_growth_rate(game_state)/ self.game_params['maxTicks']*10
+        # reward = self._calculate_growth_delta(game_state)*0.1
+        # reward = self._calculate_ship_delta(game_state)*0.1
+        reward = self._calculate_change_in_score_delta(game_state)/10
         
         # If game is terminal, give a final reward based on outcome
         if game_state['isTerminal'] or game_state['tick'] >= self.max_ticks:

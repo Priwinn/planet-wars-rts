@@ -276,10 +276,10 @@ class PlanetWarsAgentGNN(nn.Module):
             target_logits = self.target_actor(target_features).squeeze(-1)  # [num_nodes]
 
             # Create target mask (opponent planets + neutral, but not source planet)
-            # target_mask = torch.ones_like(planet_owners[valid_action_idx], dtype=torch.bool)  # All planets
-            # target_mask = (planet_owners[valid_action_idx] != self.player_id).float()  # Not our planets
-            # target_mask = (planet_owners[valid_action_idx] != 0).float()  # Not neutrals
-            target_mask = (planet_owners[valid_batch] == 3-self.player_id).float()  #Currently targetting only opponent planets yields better results
+            target_mask = torch.ones_like(planet_owners[valid_batch], dtype=torch.bool)  # All planets
+            # target_mask = (planet_owners[valid_batch] != self.player_id).float()  # Not our planets
+            # target_mask = (planet_owners[valid_batch] != 0).float()  # Not neutrals
+            # target_mask = (planet_owners[valid_batch] == 3-self.player_id).float()  #Currently targetting only opponent planets yields better results
 
             dense_valid_batch_idx = torch.arange(valid_action_idx.sum(), device=source_logits.device).repeat_interleave(num_nodes[valid_action_idx])
             dense_target_logits = to_dense_batch(target_logits, dense_valid_batch_idx, fill_value=-1e8)[0]  # [batch_size, max_num_planets]

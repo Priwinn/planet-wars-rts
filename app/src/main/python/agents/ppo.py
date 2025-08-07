@@ -25,10 +25,11 @@ from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
 from gym_utils.gym_wrapper import PlanetWarsForwardModelEnv, PlanetWarsForwardModelGNNEnv
-from core.game_state import Player
+from core.game_state import Player, GameParams
 from agents.mlp import PlanetWarsAgentMLP
 from agents.gnn import PlanetWarsAgentGNN, GraphInstanceToPyG
 from agents.baseline_policies import GreedyPolicy,RandomPolicy, FocusPolicy, DefensivePolicy
+from agents.random_agents import CarefulRandomAgent
 from gym_utils.self_play import NaiveSelfPlay
 
 
@@ -57,11 +58,11 @@ class Args:
     """the id of the environment. Filled in runtime, either `PlanetWarsForwardModel` or `PlanetWarsForwardModelGNN` according to agent type"""
     total_timesteps: int = 10000000
     """total timesteps of the experiments"""
-    learning_rate: float = 2e-3
+    learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
     num_envs: int = 12
     """the number of parallel game environments"""
-    num_steps: int = 512
+    num_steps: int = 1024
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
@@ -69,9 +70,9 @@ class Args:
     """the discount factor gamma"""
     gae_lambda: float = 0.95
     """the lambda for the general advantage estimation"""
-    num_minibatches: int = 4
+    num_minibatches: int = 64
     """the number of mini-batches"""
-    update_epochs: int = 4
+    update_epochs: int = 10
     """the K epochs to update the policy"""
     norm_adv: bool = True
     """Toggles advantages normalization"""
@@ -116,7 +117,7 @@ class Args:
     """if toggled, AsyncVectorEnv will be used"""
 
     # Opponent configuration
-    opponent_type: str = "greedy"  # "random", "greedy", "focus", "defensive"
+    opponent_type: str = "random"  # "random", "greedy", "focus", "defensive"
     """type of opponent to train against"""
     self_play: str = None 
 
@@ -179,6 +180,10 @@ def make_env(env_id, idx, capture_video, run_name, device, args):
             env.set_opponent_policy(FocusPolicy(game_params=env.game_params, player=Player.Player2))
         elif args.opponent_type == "defensive":
             env.set_opponent_policy(DefensivePolicy(game_params=env.game_params, player=Player.Player2))
+        elif args.opponent_type == "careful_random":
+            opponent = CarefulRandomAgent()
+            opponent.prepare_to_play_as(params=GameParams(**env.game_params), player=Player.Player2)
+            env.set_opponent_policy(opponent)
 
         env = PlanetWarsActionWrapper(env, num_planets, args.use_adjacency_matrix, args.flatten_observation, device, node_feature_dim=args.node_feature_dim)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -412,7 +417,7 @@ if __name__ == "__main__":
                         recent_win_rate = np.mean(win_rate[-50:]) if len(win_rate) >= 50 else np.mean(win_rate) if win_rate else 0.0
                         writer.add_scalar("charts/win_rate", recent_win_rate, global_step)
                          # Reset curriculum step if win rate is good and move to next curriculum step
-                        if recent_win_rate >= 0.95 and lesson_episode_count >= 50 and args.opponent_type == "random":
+                        if recent_win_rate >= 0.9 and lesson_episode_count >= 50 and args.opponent_type == "random":
                             args.opponent_type = "greedy"  # Switch to greedy opponent
                             print(f"Lesson completed in {curriculum_step} steps, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
                             curriculum_step = 0
@@ -420,18 +425,15 @@ if __name__ == "__main__":
                             lesson_number += 1
                             envs.close()
                             envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args)
-                        # If win rate is good, generate new maps for next lesson
-                        # if recent_win_rate >= 0.75 and lesson_episode_count >= 100 and args.opponent_type == "greedy":
-                        #     print(f"Generating new map for lesson {lesson_number} with opponent type '{args.opponent_type}'")
-                        #     curriculum_step = 0
-                        #     lesson_episode_count = 0
-                        #     lesson_number += 1
-                        #     envs.close()
-                        #     envs = gym.vector.SyncVectorEnv(
-                        #         [make_env(args.env_id, i, args.capture_video, args.run_name, device, args) for i in range(args.num_envs)],
-                        #     )
-                        #     envs.reset(seed=args.seed + lesson_number)  # Reset with a new seed for new map (kotlin bridge probably doesnt use this anyway, but a new instance should make a new map)
-                        # if (recent_win_rate >= 0.95 and lesson_episode_count >= 50 and args.opponent_type == "greedy"):
+                        if recent_win_rate >= 0.9 and lesson_episode_count >= 50 and args.opponent_type == "greedy":
+                            args.opponent_type = "careful_random"  # Switch to careful random opponent
+                            print(f"Lesson completed in {curriculum_step} steps, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
+                            curriculum_step = 0
+                            lesson_episode_count = 0
+                            lesson_number += 1
+                            envs.close()
+                            envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args)
+                        # if (recent_win_rate >= 0.9 and lesson_episode_count >= 50 and args.opponent_type == "greedy"):
                         #     args.self_play = "naive"  # Switch to self-play
                         #     print(f"Lesson completed in {curriculum_step} steps, switching to self-play with self-play type '{args.self_play}'.")
                         #     curriculum_step = 0
