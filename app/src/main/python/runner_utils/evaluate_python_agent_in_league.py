@@ -3,6 +3,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Type, Tuple
+import os
 
 import multiprocessing
 import re
@@ -26,15 +27,15 @@ def find_project_root(start: Path = Path(__file__)) -> Path:
     raise FileNotFoundError("Could not find 'gradlew' in any parent directory.")
 
 
-def run_agent_server(port: int):
+def run_agent_server(port: int, agent):
     import asyncio
-    agent_server = GameServerAgent(port=port)
+    agent_server = GameServerAgent(port=port, agent=agent)
     asyncio.run(agent_server.start())
 
 
 def evaluate_python_agent(agent_class: Type, port: int = 49875) -> Tuple[str, float]:
     # Launch the Python agent server in a separate process, return the league markdown and average win rate
-    process = multiprocessing.Process(target=run_agent_server, args=(port,), daemon=True)
+    process = multiprocessing.Process(target=run_agent_server, args=(port, agent_class), daemon=True)
     process.start()
 
     # Give the server a moment to boot
@@ -47,10 +48,10 @@ def evaluate_python_agent(agent_class: Type, port: int = 49875) -> Tuple[str, fl
         # Run Kotlin evaluation
         print("⚙️ Running evaluation via Gradle...")
         result = subprocess.run(
-            ["./gradlew", "runEvaluation", f"--args={port}"],
+            ["gradlew.bat" if os.name == 'nt' else "./gradlew", "runEvaluation", f"--args={port}"],
             capture_output=True,
             text=True,
-            cwd=cwd,
+            cwd=cwd
         )
 
         if result.returncode != 0:
@@ -73,7 +74,7 @@ if __name__ == "__main__":
     start_time = time.time()
     from agents.greedy_heuristic_agent import GreedyHeuristicAgent
 
-    markdown, average = evaluate_python_agent(GreedyHeuristicAgent, port=49875)
+    markdown, average = evaluate_python_agent(GreedyHeuristicAgent, port=8080)
     print("### Evaluation Results")
     print(markdown)
     print(f"Average win rate: {average:.2f}")

@@ -29,7 +29,7 @@ class TorchAgentGNN(PlanetWarsPlayer):
             'width': 640,
             'height': 480
         }
-        self.edge_index = torch.Tensor([[i, j] for i in range(self.game_params['numPlanets']) for j in range(self.game_params['numPlanets']) if i != j]).long().permute(1, 0)
+        # self.edge_index = torch.Tensor([[i, j] for i in range(self.game_params['numPlanets']) for j in range(self.game_params['numPlanets']) if i != j]).long().permute(1, 0)
         self.initial_game_state = None
         self.edge_attr = None
         
@@ -95,7 +95,7 @@ class TorchAgentGNN(PlanetWarsPlayer):
         if planet.transporter is not None:
             target_planet = self._get_planet_by_id(planet.transporter.destination_index, game_state=game_state)
             distance = np.sqrt((target_planet.position.x - planet.transporter.s.x)**2 + (target_planet.position.y - planet.transporter.s.y)**2)- target_planet.radius
-            weight = 10*self.game_params['transporterSpeed'] / (distance + 1e-8)
+            weight = 10*self.params.transporter_speed / (distance + 1e-8)
             return torch.FloatTensor([self.player_to_int(planet.transporter.owner),
                                        planet.transporter.n_ships/10,
                                        weight])
@@ -107,20 +107,20 @@ class TorchAgentGNN(PlanetWarsPlayer):
         planet_i = self._get_planet_by_id(i, game_state=game_state)
         planet_j = self._get_planet_by_id(j, game_state=game_state)
         distance = np.sqrt((planet_i.position.x - planet_j.position.x) ** 2 + (planet_i.position.y - planet_j.position.y) ** 2) - planet_j.radius
-        weight = 10*self.game_params['transporterSpeed'] / (distance + 1e-8)
+        weight = 10*self.params.transporter_speed / (distance + 1e-8)
         return np.array([0.0,0.0, weight], dtype=np.float32)
     def _get_planet_by_id(self, planet_id: int, game_state: GameState) -> Dict[str, Any]:
         """Get planet data by ID"""
         for planet in game_state.planets:
             if planet.id == planet_id:
                 return planet
-        return None
+        raise ValueError(f"Planet with ID {planet_id} not found")
     def _get_edge_index(self,i,j) -> int:
         """Get edge index for graph representation. Considers no self-loops are present."""
         if j>i:
-            return i * (self.game_params['numPlanets']-1) + j-1
+            return i * (self.params.num_planets-1) + j-1
         elif j<i:
-            return i * (self.game_params['numPlanets']-1) + j
+            return i * (self.params.num_planets-1) + j
         else:
             raise ValueError("No self-loops allowed")
         
@@ -138,6 +138,7 @@ class TorchAgentGNN(PlanetWarsPlayer):
     def prepare_to_play_as(self, player: Player, params: GameParams, opponent: str | None = ...) -> str:
         self.model.player_id = 1 if player == Player.Player1 else 2
         self.player_id = self.model.player_id
+        self.edge_index = torch.Tensor([[i, j] for i in range(params.num_planets) for j in range(params.num_planets) if i != j]).long().permute(1, 0)
         return super().prepare_to_play_as(player, params, opponent)
         
     

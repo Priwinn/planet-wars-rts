@@ -404,7 +404,10 @@ class PlanetWarsAgentGNN(nn.Module):
                 target_logits = self.target_actor(target_features).squeeze(-1).unsqueeze(0)  # [1, num_planets]
 
                 # Create target mask (opponent planets only, same as get_action_and_value)
-                target_mask = (planet_owners == 3-self.player_id).float()  # Only opponent planets
+                target_mask = torch.ones_like(planet_owners, dtype=torch.bool)  # All planets
+                # target_mask = (planet_owners != self.player_id).float()  # Not our planets
+                # target_mask = (planet_owners != 0).float()  # Not neutrals
+                # target_mask = (planet_owners == 3-self.player_id).float()  # Only opponent planets
                 
                 # Prevent sending to self (source_action - 1 because source_action includes no-op offset)
                 target_mask[0, source_action[0] - 1] = 0
@@ -433,7 +436,7 @@ class PlanetWarsAgentGNN(nn.Module):
                     ratio_action = ratio_action.float() / (self.args.discretized_ratio_bins-1)
 
             action = torch.cat([
-                source_action.float(),
+                source_action.float()-1,
                 target_action.float(),
                 ratio_action.squeeze(-1)
             ], dim=-1)
