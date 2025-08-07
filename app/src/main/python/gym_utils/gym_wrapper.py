@@ -262,10 +262,11 @@ class PlanetWarsForwardModelEnv(gym.Env):
         game_state = self.bridge.get_game_state()
         planets = game_state['planets']
         node_features = torch.Tensor(np.stack([self._get_planet_features(p) for p in planets], axis=0))
-        
+
         return Data(
             x = node_features,
             edge_index=self.edge_index,
+            tick=torch.tensor(game_state['tick'] / self.game_params['maxTicks'], dtype=torch.float32)
         )
     
     def _owner_one_hot_encoding(self, owner: torch.Tensor) -> torch.Tensor:
@@ -324,7 +325,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
             owner = planet['owner']
             
             # Base score: ship (+ growth rate)
-            planet_value = planet['numShips'] + planet['growthRate'] * 100 #* (self.game_params['maxTicks']- game_state['tick'])
+            planet_value = planet['numShips'] + planet['growthRate'] * (self.game_params['maxTicks']- game_state['tick'])
 
             if owner == self.player_int:
                 controlled_player_score += planet_value
@@ -525,7 +526,8 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
         return Data(
             x=node_features,
             edge_index=self.edge_index,
-            edge_attr=edge_features
+            edge_attr=edge_features,
+            tick=game_state['tick'] / self.game_params['maxTicks']
         )
 
 

@@ -51,7 +51,7 @@ class PlanetWarsAgentGNN(nn.Module):
         # self.edge_index = torch.Tensor([[i, j] for i in range(args.num_planets) for j in range(args.num_planets) if i != j]).long().permute(1, 0)
 
         # Node feature dimension from gym wrapper
-        self.node_feature_dim = args.node_feature_dim + 1 # +2 for planet owner one-hot encodings -1 for hasTransporter (we only use it to avoid calculating the transporter from edges)
+        self.node_feature_dim = args.node_feature_dim
         self.hidden_dim = args.hidden_dim if hasattr(args, 'hidden_dim') else 128  # Default hidden dimension
         
         # Graph Attention Network layers (edge features)
@@ -185,7 +185,7 @@ class PlanetWarsAgentGNN(nn.Module):
         planet_owners = data.x[:, 0]
         transporter_owners_per_edge = data.edge_attr[:, 0]
         x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id),
-                       data.x[:, 1:-1]), dim=-1)
+                       data.x[:, 1:-1], data.tick[batch].unsqueeze(-1)), dim=-1)
         edge_attr=torch.cat((owner_one_hot_encoding(transporter_owners_per_edge, self.player_id),
                             data.edge_attr[:, 1:]), dim=-1)
 
@@ -211,8 +211,9 @@ class PlanetWarsAgentGNN(nn.Module):
 
         #one-hot encode planet owners and transporter owners
         data.x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id),
-                           data.x[:, 1:-1]),
-                          dim=-1)
+                           data.x[:, 1:-1],
+                           data.tick[batch].unsqueeze(-1)),
+                           dim=-1)
         data.edge_attr = torch.cat((owner_one_hot_encoding(transporter_owners_per_edge, self.player_id),
                                    data.edge_attr[:, 1:]), dim=-1)
         
@@ -362,7 +363,8 @@ class PlanetWarsAgentGNN(nn.Module):
 
             #one-hot encode planet owners and transporter owners
             data.x = torch.cat((owner_one_hot_encoding(planet_owners.view(-1), self.player_id),
-                            data.x[:, 1:]),
+                            data.x[:, 1:],
+                            data.tick[0].unsqueeze(-1)),
                             dim=-1)
             data.edge_attr = torch.cat((owner_one_hot_encoding(transporter_owners_per_edge.view(-1), self.player_id),
                                     data.edge_attr[:, 1:]), dim=-1)

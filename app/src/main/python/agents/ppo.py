@@ -30,6 +30,7 @@ from agents.mlp import PlanetWarsAgentMLP
 from agents.gnn import PlanetWarsAgentGNN, GraphInstanceToPyG
 from agents.baseline_policies import GreedyPolicy,RandomPolicy, FocusPolicy, DefensivePolicy
 from agents.random_agents import CarefulRandomAgent
+from agents.better_greedy_heuristic_agent import BetterGreedyHeuristicAgent
 from gym_utils.self_play import NaiveSelfPlay
 
 
@@ -184,6 +185,10 @@ def make_env(env_id, idx, capture_video, run_name, device, args):
             opponent = CarefulRandomAgent()
             opponent.prepare_to_play_as(params=GameParams(**env.game_params), player=Player.Player2)
             env.set_opponent_policy(opponent)
+        elif args.opponent_type == "better_greedy":
+            opponent = BetterGreedyHeuristicAgent()
+            opponent.prepare_to_play_as(params=GameParams(**env.game_params), player=Player.Player2)
+            env.set_opponent_policy(opponent)
 
         env = PlanetWarsActionWrapper(env, num_planets, args.use_adjacency_matrix, args.flatten_observation, device, node_feature_dim=args.node_feature_dim)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -260,7 +265,7 @@ if __name__ == "__main__":
     args.num_iterations = args.total_timesteps // args.batch_size
     args.flatten_observation = args.agent_type != "gnn"
     args.env_id = "PlanetWarsForwardModelGNN" if args.agent_type == "gnn" else "PlanetWarsForwardModel"
-    args.node_feature_dim = 4 if args.agent_type == "gnn" else 10
+    args.node_feature_dim = 6 if args.agent_type == "gnn" else 10
     args.run_name = f"{args.env_id}__{args.exp_name}__{args.opponent_type}__{int(time.time())}"
 
     if args.use_async:
@@ -433,6 +438,15 @@ if __name__ == "__main__":
                             lesson_number += 1
                             envs.close()
                             envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args)
+                        if recent_win_rate >= 0.9 and lesson_episode_count >= 50 and args.opponent_type == "careful_random":
+                            args.opponent_type = "better_greedy"  # Switch to better greedy opponent
+                            print(f"Lesson completed in {curriculum_step} steps, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
+                            curriculum_step = 0
+                            lesson_episode_count = 0
+                            lesson_number += 1
+                            envs.close()
+                            envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args)
+
                         # if (recent_win_rate >= 0.9 and lesson_episode_count >= 50 and args.opponent_type == "greedy"):
                         #     args.self_play = "naive"  # Switch to self-play
                         #     print(f"Lesson completed in {curriculum_step} steps, switching to self-play with self-play type '{args.self_play}'.")
