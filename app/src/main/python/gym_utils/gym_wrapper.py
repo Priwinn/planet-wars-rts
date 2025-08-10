@@ -325,7 +325,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
             owner = planet['owner']
             
             # Base score: ship (+ growth rate)
-            planet_value = planet['numShips'] + planet['growthRate'] * (self.game_params['maxTicks']- game_state['tick'])
+            planet_value = planet['numShips'] + planet['growthRate'] * 100 #np.sqrt(self.game_params['maxTicks']- game_state['tick'])
 
             if owner == self.player_int:
                 controlled_player_score += planet_value
@@ -423,7 +423,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
         # reward = self._calculate_growth_rate(game_state)/ self.game_params['maxTicks']*10
         # reward = self._calculate_growth_delta(game_state)*0.1
         # reward = self._calculate_ship_delta(game_state)*0.1
-        reward = self._calculate_change_in_score_delta(game_state)/10
+        reward = self._calculate_change_in_score_delta(game_state)/20
         
         # If game is terminal, give a final reward based on outcome
         if game_state['isTerminal'] or game_state['tick'] >= self.max_ticks:

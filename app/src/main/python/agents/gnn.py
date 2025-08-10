@@ -184,8 +184,13 @@ class PlanetWarsAgentGNN(nn.Module):
         data, batch = obs, obs.batch
         planet_owners = data.x[:, 0]
         transporter_owners_per_edge = data.edge_attr[:, 0]
-        x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id),
-                       data.x[:, 1:-1], data.tick[batch].unsqueeze(-1)), dim=-1)
+        if self.args.use_tick:
+            x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id),
+                        data.x[:, 1:-1], data.tick[batch].unsqueeze(-1)), dim=-1)
+        else:
+            x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id),
+                        data.x[:, 1:-1]), dim=-1)
+
         edge_attr=torch.cat((owner_one_hot_encoding(transporter_owners_per_edge, self.player_id),
                             data.edge_attr[:, 1:]), dim=-1)
 
@@ -210,10 +215,14 @@ class PlanetWarsAgentGNN(nn.Module):
         transporter_owners = data.x[:, 3]
 
         #one-hot encode planet owners and transporter owners
-        data.x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id),
-                           data.x[:, 1:-1],
-                           data.tick[batch].unsqueeze(-1)),
-                           dim=-1)
+        if self.args.use_tick:
+            data.x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id),
+                            data.x[:, 1:-1],
+                            data.tick[batch].unsqueeze(-1)),
+                            dim=-1)
+        else:
+            data.x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id),
+                            data.x[:, 1:-1]), dim=-1)
         data.edge_attr = torch.cat((owner_one_hot_encoding(transporter_owners_per_edge, self.player_id),
                                    data.edge_attr[:, 1:]), dim=-1)
         
@@ -362,10 +371,14 @@ class PlanetWarsAgentGNN(nn.Module):
             transporter_owners = torch.sum(transporter_owners_per_edge, dim=2) > 0  # [1, num_planets]
 
             #one-hot encode planet owners and transporter owners
-            data.x = torch.cat((owner_one_hot_encoding(planet_owners.view(-1), self.player_id),
-                            data.x[:, 1:],
-                            data.tick[0].unsqueeze(-1)),
-                            dim=-1)
+            if self.args.use_tick:
+                data.x = torch.cat((owner_one_hot_encoding(planet_owners.view(-1), self.player_id),
+                                data.x[:, 1:],
+                                data.tick[0].unsqueeze(-1)),
+                                dim=-1)
+            else:
+                data.x = torch.cat((owner_one_hot_encoding(planet_owners.view(-1), self.player_id),
+                                    data.x[:, 1:]), dim=-1)
             data.edge_attr = torch.cat((owner_one_hot_encoding(transporter_owners_per_edge.view(-1), self.player_id),
                                     data.edge_attr[:, 1:]), dim=-1)
 

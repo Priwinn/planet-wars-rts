@@ -57,9 +57,9 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "PlanetWarsForwardModel"
     """the id of the environment. Filled in runtime, either `PlanetWarsForwardModel` or `PlanetWarsForwardModelGNN` according to agent type"""
-    total_timesteps: int = 10000000
+    total_timesteps: int = 20000000
     """total timesteps of the experiments"""
-    learning_rate: float = 2.5e-4
+    learning_rate: float = 1e-3
     """the learning rate of the optimizer"""
     num_envs: int = 12
     """the number of parallel game environments"""
@@ -67,13 +67,15 @@ class Args:
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
-    gamma: float = 0.99
+    anneal_ent_coef: bool = False
+    """Toggle entropy coefficient annealing"""
+    gamma: float = 0.995
     """the discount factor gamma"""
     gae_lambda: float = 0.95
     """the lambda for the general advantage estimation"""
-    num_minibatches: int = 64
+    num_minibatches: int = 96
     """the number of mini-batches"""
-    update_epochs: int = 10
+    update_epochs: int = 4
     """the K epochs to update the policy"""
     norm_adv: bool = True
     """Toggles advantages normalization"""
@@ -87,7 +89,7 @@ class Args:
     """coefficient of the value function"""
     max_grad_norm: float = 3.5
     """the maximum norm for the gradient clipping"""
-    target_kl: float = 0.01
+    target_kl: float = None
     """the target KL divergence threshold"""
 
     # Planet Wars specific
@@ -116,6 +118,8 @@ class Args:
     """Path to save profiling data, if None profiling is disabled"""
     use_async: bool = True
     """if toggled, AsyncVectorEnv will be used"""
+    use_tick: bool = False
+    """if toggled, the game tick will be passed as an observation"""
 
     # Opponent configuration
     opponent_type: str = "random"  # "random", "greedy", "focus", "defensive"
@@ -265,7 +269,9 @@ if __name__ == "__main__":
     args.num_iterations = args.total_timesteps // args.batch_size
     args.flatten_observation = args.agent_type != "gnn"
     args.env_id = "PlanetWarsForwardModelGNN" if args.agent_type == "gnn" else "PlanetWarsForwardModel"
-    args.node_feature_dim = 6 if args.agent_type == "gnn" else 10
+    args.node_feature_dim = 5 if args.agent_type == "gnn" else 10
+    if args.use_tick:
+        args.node_feature_dim += 1  # Add tick feature if use_tick is enabled
     args.run_name = f"{args.env_id}__{args.exp_name}__{args.opponent_type}__{int(time.time())}"
 
     if args.use_async:
@@ -362,13 +368,22 @@ if __name__ == "__main__":
     episode_lengths = []
     win_rate = []
     os.makedirs("models", exist_ok=True)
-    
+
+    ent_coef = args.ent_coef
+    if args.anneal_lr:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.num_iterations)
     for iteration in range(1, args.num_iterations + 1):
         # Annealing the rate if instructed to do so
-        if args.anneal_lr:
-            frac = 1.0 - (iteration - 1.0) / args.num_iterations
-            lrnow = frac * args.learning_rate
-            optimizer.param_groups[0]["lr"] = lrnow
+        # if args.anneal_lr:
+            # frac = 1.0 - (iteration - 1.0) / args.num_iterations
+            # lrnow = frac * args.learning_rate
+            # optimizer.param_groups[0]["lr"] = lrnow
+            
+            
+        if args.anneal_ent_coef:
+            frac = 0.99
+            ent_coef = frac * ent_coef
+
 
         for step in range(0, args.num_steps):
             global_step += args.num_envs
@@ -447,37 +462,35 @@ if __name__ == "__main__":
                             envs.close()
                             envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args)
 
-                        # if (recent_win_rate >= 0.9 and lesson_episode_count >= 50 and args.opponent_type == "greedy"):
-                        #     args.self_play = "naive"  # Switch to self-play
-                        #     print(f"Lesson completed in {curriculum_step} steps, switching to self-play with self-play type '{args.self_play}'.")
-                        #     curriculum_step = 0
-                        #     lesson_episode_count = 0
-                        #     args.opponent_type = None
-                        #     lesson_number += 1
+                        if (recent_win_rate >= 0.9 and lesson_episode_count >= 50 and args.opponent_type == "better_greedy"):
+                            args.self_play = "naive"  # Switch to self-play
+                            print(f"Lesson completed in {curriculum_step} steps, switching to self-play with self-play type '{args.self_play}'.")
+                            curriculum_step = 0
+                            lesson_episode_count = 0
+                            args.opponent_type = None
+                            lesson_number += 1
                             
-                        #     envs.close()
-                        #     envs = gym.vector.SyncVectorEnv(
-                        #         [make_env(args.env_id, i, args.capture_video, args.run_name, device, args) for i in range(args.num_envs)],
-                        #     )
-                        #     for env in envs.envs:
-                        #         env.env.env.self_play.add_opponent(agent.copy_as_opponent().to('cpu'))  # Add a copy of the agent as opponent in self-play
-                        #     envs.reset()
-                        #     #Save the model after switching to self-play
-                        #     torch.save({
-                        #         'iteration': iteration,
-                        #         'model_state_dict': agent.state_dict(),
-                        #         'optimizer_state_dict': optimizer.state_dict(),
-                        #         'args': args,
-                        #     }, f"models/{args.run_name}_greedy.pt")
-                        # if (recent_win_rate >= 0.7 and lesson_episode_count >= 50 and args.self_play == "naive"):
-                        #     print(f"Lesson completed in {curriculum_step} steps, updating opponent policy in self-play.")
-                        #     curriculum_step = 0
-                        #     lesson_episode_count = 0
-                        #     lesson_number += 1
+                            envs.close()
+                            envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args)
+                            for env in envs.envs:
+                                env.env.env.self_play.add_opponent(agent.copy_as_opponent().to('cpu'))  # Add a copy of the agent as opponent in self-play
+                            envs.reset()
+                            #Save the model after switching to self-play
+                            torch.save({
+                                'iteration': iteration,
+                                'model_state_dict': agent.state_dict(),
+                                'optimizer_state_dict': optimizer.state_dict(),
+                                'args': args,
+                            }, f"models/{args.run_name}_better_greedy.pt")
+                        if (recent_win_rate >= 0.7 and lesson_episode_count >= 50 and args.self_play == "naive"):
+                            print(f"Lesson completed in {curriculum_step} steps, updating opponent policy in self-play.")
+                            curriculum_step = 0
+                            lesson_episode_count = 0
+                            lesson_number += 1
                             
-                        #     for env in envs.envs:
-                        #         env.env.env.self_play.add_opponent(agent.copy_as_opponent().to('cpu'))  # Update opponent policy in self-play
-                        #     envs.reset()
+                            for env in envs.envs:
+                                env.env.env.self_play.add_opponent(agent.copy_as_opponent().to('cpu'))  # Update opponent policy in self-play
+                            envs.reset()
 
         # Bootstrap value if not done
         with torch.no_grad():
@@ -556,7 +569,7 @@ if __name__ == "__main__":
                     v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
                 entropy_loss = entropy.mean()
-                loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                loss = pg_loss - ent_coef * entropy_loss + v_loss * args.vf_coef
 
 
                 optimizer.zero_grad()
@@ -567,7 +580,8 @@ if __name__ == "__main__":
             if args.target_kl is not None and approx_kl > args.target_kl:
                 print("Early stopping at epoch {}: reached target KL divergence".format(epoch))
                 break
-
+        if args.anneal_lr:
+            scheduler.step()
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
