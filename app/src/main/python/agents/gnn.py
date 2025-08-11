@@ -43,11 +43,12 @@ def GraphInstanceToPyG(graph_instance):
 
 class PlanetWarsAgentGNN(nn.Module):
     """Graph Neural Network agent with action masking"""
-    
-    def __init__(self, args, player_id=1):
+
+    def __init__(self, args, player_id=1, exploit=True):
         super().__init__()
         self.args = args
         self.player_id = player_id
+        self.exploit = exploit
         # self.edge_index = torch.Tensor([[i, j] for i in range(args.num_planets) for j in range(args.num_planets) if i != j]).long().permute(1, 0)
 
         # Node feature dimension from gym wrapper
@@ -362,7 +363,7 @@ class PlanetWarsAgentGNN(nn.Module):
         
         return action, total_logprob, total_entropy, value
 
-    def get_action(self, data, exploit=True):
+    def get_action(self, data):
         with torch.no_grad():
             # Get masks from node features (owner is first feature)
             num_planets = data.x.size(0)
@@ -373,12 +374,12 @@ class PlanetWarsAgentGNN(nn.Module):
             #one-hot encode planet owners and transporter owners
             if self.args.use_tick:
                 data.x = torch.cat((owner_one_hot_encoding(planet_owners.view(-1), self.player_id),
-                                data.x[:, 1:],
+                                data.x[:, 1:-1],
                                 data.tick[0].unsqueeze(-1)),
                                 dim=-1)
             else:
                 data.x = torch.cat((owner_one_hot_encoding(planet_owners.view(-1), self.player_id),
-                                    data.x[:, 1:]), dim=-1)
+                                    data.x[:, 1:-1]), dim=-1)
             data.edge_attr = torch.cat((owner_one_hot_encoding(transporter_owners_per_edge.view(-1), self.player_id),
                                     data.edge_attr[:, 1:]), dim=-1)
 
@@ -401,7 +402,7 @@ class PlanetWarsAgentGNN(nn.Module):
             source_probs = MaskedCategorical(logits=source_logits, mask=source_mask)
 
             # Exploit or explore
-            if exploit:
+            if self.exploit:
                 source_action = source_probs.probs.argmax(dim=-1)  # [1]
             else:
                 source_action = source_probs.sample()  # [1]
@@ -428,7 +429,7 @@ class PlanetWarsAgentGNN(nn.Module):
                 target_mask[0, source_action[0] - 1] = 0
                 
                 target_probs = MaskedCategorical(logits=target_logits, mask=target_mask)
-                if exploit:
+                if self.exploit:
                     target_action = target_probs.probs.argmax(dim=-1)  # [1]
                 else:
                     target_action = target_probs.sample()  # [1]
@@ -439,19 +440,19 @@ class PlanetWarsAgentGNN(nn.Module):
                                     node_features[target_action[0]].unsqueeze(0)), dim=-1)
                 if self.args.discretized_ratio_bins == 0:
                     ratio_mean = torch.sigmoid(self.ratio_actor_mean(ratio_input))
-                    if exploit:
+                    if self.exploit:
                         ratio_action = ratio_mean
                     else:
                         ratio_action = SigmoidTransformedDistribution(ratio_mean, self.ratio_actor_logstd.exp()).sample()
                 else:
-                    if exploit:
+                    if self.exploit:
                         ratio_action = torch.argmax(self.ratio_actor(ratio_input), dim=-1)
                     else:
                         ratio_action = Categorical(logits=self.ratio_actor(ratio_input)).sample()
                     ratio_action = ratio_action.float() / (self.args.discretized_ratio_bins-1)
 
             action = torch.cat([
-                source_action.float()-1,
+                source_action.float(),
                 target_action.float(),
                 ratio_action.squeeze(-1)
             ], dim=-1)
@@ -472,52 +473,3 @@ class PlanetWarsAgentGNN(nn.Module):
         return new_agent
 
 
-
-# Example usage showing how to integrate with the gym environment
-if __name__ == "__main__":
-    import argparse
-    from util.gym_wrapper import PlanetWarsForwardModelEnv
-    from core.game_state import Player
-    
-    # Mock args for testing
-    class Args:
-        def __init__(self):
-            self.num_planets = 10
-            self.node_feature_dim = 13
-            self.use_adjacency_matrix = True
-            self.num_envs = 1
-            self.minibatch_size = 1
-    
-    args = Args()
-    
-    # Create environment
-    env = PlanetWarsForwardModelEnv(
-        controlled_player=Player.Player1,
-        max_ticks=100,
-        game_params={'numPlanets': args.num_planets}
-    )
-    
-    # Create GNN agent
-    agent = PlanetWarsAgentGNN(args, player_id=1)
-    
-    # Test with environment
-    obs, info = env.reset()
-    print(f"Observation shape: {obs.nodes.shape}")
-    print(f"Adjacency matrix shape: {obs.adjacency_matrix.shape}")
-    
-    # Convert to dict format expected by agent
-    obs_dict = {
-        'node_features': obs.node_features,
-        'adjacency_matrix': obs.adjacency_matrix
-    }
-    
-    # Test agent
-    with torch.no_grad():
-        action, logprob, entropy, value = agent.get_action_and_value(obs_dict)
-        print(f"Action: {action}")
-        print(f"Log prob: {logprob}")
-        print(f"Entropy: {entropy}")
-        print(f"Value: {value}")
-    
-    env.close()
-    print("GNN agent test completed!")

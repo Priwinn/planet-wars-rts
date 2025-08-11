@@ -59,7 +59,7 @@ class Args:
     """the id of the environment. Filled in runtime, either `PlanetWarsForwardModel` or `PlanetWarsForwardModelGNN` according to agent type"""
     total_timesteps: int = 20000000
     """total timesteps of the experiments"""
-    learning_rate: float = 1e-3
+    learning_rate: float = 1e-5
     """the learning rate of the optimizer"""
     num_envs: int = 12
     """the number of parallel game environments"""
@@ -120,9 +120,11 @@ class Args:
     """if toggled, AsyncVectorEnv will be used"""
     use_tick: bool = False
     """if toggled, the game tick will be passed as an observation"""
+    model_weights: str = "models/PlanetWarsForwardModelGNN__ppo__random__1754768336_final.pt"
+    """If specified, the initial model weights will be loaded from this path"""
 
     # Opponent configuration
-    opponent_type: str = "random"  # "random", "greedy", "focus", "defensive"
+    opponent_type: str = "better_greedy"  # "random", "greedy", "focus", "defensive"
     """type of opponent to train against"""
     self_play: str = None 
 
@@ -137,10 +139,9 @@ class Args:
     """the name of the run (computed in runtime)"""
 
 
-def make_env(env_id, idx, capture_video, run_name, device, args):
+def make_env(env_id, idx, capture_video, run_name, device, args, self_play=None):
     def thunk():        
-        if args.self_play == "naive":
-            self_play = NaiveSelfPlay(player_id=2)
+
 
         if env_id == "PlanetWarsForwardModel":
             env = PlanetWarsForwardModelEnv(
@@ -201,11 +202,11 @@ def make_env(env_id, idx, capture_video, run_name, device, args):
 
     return thunk
 
-def make_vector_env(env_id, capture_video, run_name, device, args):
+def make_vector_env(env_id, capture_video, run_name, device, args, self_play=None):
     if args.use_async:
-        return gym.vector.AsyncVectorEnv([make_env(env_id, i, capture_video, run_name, device, args) for i in range(args.num_envs)], shared_memory=False)
+        return gym.vector.AsyncVectorEnv([make_env(env_id, i, capture_video, run_name, device, args, self_play=self_play) for i in range(args.num_envs)], shared_memory=False)
     else:
-        return gym.vector.SyncVectorEnv([make_env(env_id, i, capture_video, run_name, device, args) for i in range(args.num_envs)])
+        return gym.vector.SyncVectorEnv([make_env(env_id, i, capture_video, run_name, device, args, self_play=self_play) for i in range(args.num_envs)])
 
 class PlanetWarsActionWrapper(gym.Wrapper):
     """Wrapper to flatten the tuple action space for Planet Wars"""
@@ -319,21 +320,32 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
+    if args.agent_type == "gnn":
+        agent = PlanetWarsAgentGNN(args).to(device)
+        agent.compile(dynamic=True)
+        if args.model_weights is not None:
+            state_dict = torch.load(args.model_weights, map_location=torch.device('cpu'), weights_only=False)
+            agent.load_state_dict(state_dict['model_state_dict'])
+    else:
+        agent = PlanetWarsAgentMLP(args).to(device)
+    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
+
+    if args.self_play == "naive":
+        self_play = NaiveSelfPlay(player_id=2)
+        self_play.add_opponent(agent)
+    else:
+        self_play = None
+
     # Environment setup
     envs = make_vector_env(
         env_id=args.env_id,
         capture_video=args.capture_video,
         run_name=args.run_name,
         device=device,
-        args=args
+        args=args,
+        self_play=self_play
     )
 
-    if args.agent_type == "gnn":
-        agent = PlanetWarsAgentGNN(args).to(device)
-        agent.compile(dynamic=True)
-    else:
-        agent = PlanetWarsAgentMLP(args).to(device)
-    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # Storage setup
     if args.flatten_observation:
@@ -444,7 +456,7 @@ if __name__ == "__main__":
                             lesson_episode_count = 0
                             lesson_number += 1
                             envs.close()
-                            envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args)
+                            envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
                         if recent_win_rate >= 0.9 and lesson_episode_count >= 50 and args.opponent_type == "greedy":
                             args.opponent_type = "careful_random"  # Switch to careful random opponent
                             print(f"Lesson completed in {curriculum_step} steps, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
@@ -452,7 +464,7 @@ if __name__ == "__main__":
                             lesson_episode_count = 0
                             lesson_number += 1
                             envs.close()
-                            envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args)
+                            envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
                         if recent_win_rate >= 0.9 and lesson_episode_count >= 50 and args.opponent_type == "careful_random":
                             args.opponent_type = "better_greedy"  # Switch to better greedy opponent
                             print(f"Lesson completed in {curriculum_step} steps, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
@@ -460,21 +472,17 @@ if __name__ == "__main__":
                             lesson_episode_count = 0
                             lesson_number += 1
                             envs.close()
-                            envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args)
+                            envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
 
-                        if (recent_win_rate >= 0.9 and lesson_episode_count >= 50 and args.opponent_type == "better_greedy"):
+                        if (recent_win_rate >= 1.0 and lesson_episode_count >= 50 and args.opponent_type == "better_greedy"):
                             args.self_play = "naive"  # Switch to self-play
+                            self_play = NaiveSelfPlay(player_id=2)
                             print(f"Lesson completed in {curriculum_step} steps, switching to self-play with self-play type '{args.self_play}'.")
                             curriculum_step = 0
                             lesson_episode_count = 0
                             args.opponent_type = None
                             lesson_number += 1
-                            
-                            envs.close()
-                            envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args)
-                            for env in envs.envs:
-                                env.env.env.self_play.add_opponent(agent.copy_as_opponent().to('cpu'))  # Add a copy of the agent as opponent in self-play
-                            envs.reset()
+
                             #Save the model after switching to self-play
                             torch.save({
                                 'iteration': iteration,
@@ -482,14 +490,23 @@ if __name__ == "__main__":
                                 'optimizer_state_dict': optimizer.state_dict(),
                                 'args': args,
                             }, f"models/{args.run_name}_better_greedy.pt")
+                            if args.track:
+                                wandb.save(f"models/{args.run_name}_better_greedy.pt")
+                            
+
+                            envs.close()
+                            self_play.add_opponent(agent.copy_as_opponent().to('cpu'))
+                            args.use_async=False
+                            envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
+                            envs.reset()
+
                         if (recent_win_rate >= 0.7 and lesson_episode_count >= 50 and args.self_play == "naive"):
                             print(f"Lesson completed in {curriculum_step} steps, updating opponent policy in self-play.")
                             curriculum_step = 0
                             lesson_episode_count = 0
                             lesson_number += 1
-                            
-                            for env in envs.envs:
-                                env.env.env.self_play.add_opponent(agent.copy_as_opponent().to('cpu'))  # Update opponent policy in self-play
+                            self_play.add_opponent(agent.copy_as_opponent().to('cpu'))
+                            envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
                             envs.reset()
 
         # Bootstrap value if not done

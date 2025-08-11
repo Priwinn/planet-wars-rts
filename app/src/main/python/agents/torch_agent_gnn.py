@@ -23,7 +23,7 @@ class TorchAgentGNN(PlanetWarsPlayer):
         self.model = model_class(state_dict['args'])
         self.model.load_state_dict(state_dict['model_state_dict']) if model_class and weights_path else None
         self.game_params = {
-            'maxTicks': 20000,
+            'maxTicks': 2000,
             'numPlanets': 20,
             'transporterSpeed': 3.0,
             'width': 640,
@@ -39,13 +39,13 @@ class TorchAgentGNN(PlanetWarsPlayer):
         x = self._get_observation(game_state)# Add batch dimension
 
         action = self.model.get_action(x)
-        if action[0] < 0:
+        if action[0] == 0:
             # No-op action, return None
             return Action.do_nothing()
         else:
             return Action(
                 player_id=self.player,
-                source_planet_id=action[0],
+                source_planet_id=action[0]-1,
                 destination_planet_id=action[1],
                 num_ships=action[2] * game_state.planets[action[0].int()].n_ships,
         )
@@ -87,6 +87,7 @@ class TorchAgentGNN(PlanetWarsPlayer):
             0 if planet.owner == Player.Neutral else 1 if planet.owner == Player.Player1 else 2,  # Owner ID
             planet.n_ships/10,  # Number of ships
             10*planet.growth_rate,  # Growth rate
+            1.0 if planet.transporter is not None else 0.0  # Has transporter
         ])
         return features
 

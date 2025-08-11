@@ -164,8 +164,10 @@ class PlanetWarsForwardModelEnv(gym.Env):
         
         if self.self_play:
             device = next(self.opponent_policy.parameters()).device  # Same device as opponent, assume it is a PyTorch model
-            opponent_action = self.opponent_policy.get_action(self._get_observation().to(device=device))
-            opponent_action = tensor_to_action(opponent_action, self.opponent_player)
+            obs = self._get_observation().to(device=device)
+            opponent_action = self.opponent_policy.get_action(obs)
+            opponent_action = self._convert_gym_action_to_game_action(opponent_action)
+            
         elif isinstance(self.opponent_policy, PlanetWarsPlayer):
             opponent_action = self.opponent_policy.get_action(self.bridge.game_state)
         elif callable(self.opponent_policy):
@@ -215,7 +217,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
         """Convert gym action to game engine action format"""
         source_planet = int(gym_action[0])
         target_planet = int(gym_action[1])
-        ship_ratio = float(gym_action[2][0])
+        ship_ratio = float(gym_action[2])
         if source_planet == 0:
             # No-op action
             return Action.do_nothing()
@@ -226,27 +228,27 @@ class PlanetWarsForwardModelEnv(gym.Env):
         current_state = self.bridge.get_game_state()
         planets = current_state['planets']
         
-        # Validate source planet
-        if source_planet >= len(planets):
-            return Action.do_nothing()
+        # # Validate source planet
+        # if source_planet >= len(planets):
+        #     return Action.do_nothing()
         
         source_planet_data = planets[source_planet]
         
-        # Check if we own the source planet and it's not busy
-        if (source_planet_data['owner'] != self.player_int or 
-            source_planet_data.get('transporter') is not None):
-            return Action.do_nothing()
+        # # Check if we own the source planet and it's not busy
+        # if (source_planet_data['owner'] != self.player_int or 
+        #     source_planet_data.get('transporter') is not None):
+        #     return Action.do_nothing()
         
         # Calculate number of ships to send
         num_ships = source_planet_data['numShips'] * ship_ratio
         
         # Ships sent has to be positive and less than available ships
-        if num_ships <= 0 or num_ships > source_planet_data['numShips']:
-            return Action.do_nothing()
+        # if num_ships <= 0 or num_ships >= source_planet_data['numShips']:
+        #     return Action.do_nothing()
         
-        # Validate target planet (can't send to self)
-        if target_planet == source_planet or target_planet >= len(planets):
-            return Action.do_nothing()
+        # # Validate target planet (can't send to self)
+        # if target_planet == source_planet or target_planet >= len(planets):
+        #     return Action.do_nothing()
         
         return Action(
             player_id=self.controlled_player,
