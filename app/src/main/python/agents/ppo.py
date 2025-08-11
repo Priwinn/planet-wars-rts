@@ -172,9 +172,13 @@ def make_env(env_id, idx, capture_video, run_name, device, args, self_play=None)
                 game_params={
                     'numPlanets': num_planets,
                     'maxTicks': args.max_ticks,
-                    'transporterSpeed': 3.0,
+                    'transporterSpeed': np.random.uniform(2.0, 5.0),
                     'width': 640,
-                    'height': 480
+                    'height': 480,
+                    'newMapEachRun': args.new_map_each_run,
+                    'minGrowthRate': 0.05,
+                    'maxGrowthRate': 0.2,
+                    'initialNeutralRatio': np.random.uniform(0.25, 0.35)
                 },
                 self_play= self_play if args.self_play == "naive" else None
             )
@@ -474,7 +478,7 @@ if __name__ == "__main__":
                             envs.close()
                             envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
 
-                        if (recent_win_rate >= 1.0 and lesson_episode_count >= 50 and args.opponent_type == "better_greedy"):
+                        if (recent_win_rate >= 0.9 and lesson_episode_count >= 50 and args.opponent_type == "better_greedy"):
                             args.self_play = "naive"  # Switch to self-play
                             self_play = NaiveSelfPlay(player_id=2)
                             print(f"Lesson completed in {curriculum_step} steps, switching to self-play with self-play type '{args.self_play}'.")
@@ -500,7 +504,7 @@ if __name__ == "__main__":
                             envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
                             envs.reset()
 
-                        if (recent_win_rate >= 0.7 and lesson_episode_count >= 50 and args.self_play == "naive"):
+                        if (recent_win_rate >= 0.75 and lesson_episode_count >= 50 and args.self_play == "naive"):
                             print(f"Lesson completed in {curriculum_step} steps, updating opponent policy in self-play.")
                             curriculum_step = 0
                             lesson_episode_count = 0

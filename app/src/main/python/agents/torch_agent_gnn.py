@@ -22,14 +22,7 @@ class TorchAgentGNN(PlanetWarsPlayer):
         state_dict = torch.load(weights_path, map_location=torch.device('cpu'), weights_only=False)
         self.model = model_class(state_dict['args'])
         self.model.load_state_dict(state_dict['model_state_dict']) if model_class and weights_path else None
-        self.game_params = {
-            'maxTicks': 2000,
-            'numPlanets': 20,
-            'transporterSpeed': 3.0,
-            'width': 640,
-            'height': 480
-        }
-        # self.edge_index = torch.Tensor([[i, j] for i in range(self.game_params['numPlanets']) for j in range(self.game_params['numPlanets']) if i != j]).long().permute(1, 0)
+
         self.initial_game_state = None
         self.edge_attr = None
         
@@ -47,7 +40,7 @@ class TorchAgentGNN(PlanetWarsPlayer):
                 player_id=self.player,
                 source_planet_id=action[0]-1,
                 destination_planet_id=action[1],
-                num_ships=action[2] * game_state.planets[action[0].int()].n_ships,
+                num_ships=action[2] * game_state.planets[action[0].int()-1].n_ships,
         )
 
     def get_agent_type(self) -> str:
