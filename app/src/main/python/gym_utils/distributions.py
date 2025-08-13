@@ -77,7 +77,7 @@ class MaskedCategorical(Categorical):
         if mask is not None:
             # Set logits of invalid actions to very negative values
             if logits is not None:
-                logits = torch.where(mask.bool(), logits, torch.tensor(-1e8, device=logits.device))
+                logits = torch.where(mask.bool(), logits, torch.tensor(torch.finfo(torch.float32).min, device=logits.device))
             elif probs is not None:
                 probs = torch.where(mask.bool(), probs, torch.tensor(1e-8, device=probs.device))
         

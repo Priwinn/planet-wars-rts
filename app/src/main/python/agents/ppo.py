@@ -9,12 +9,9 @@ from itertools import chain
 import glob
 
 import gymnasium as gym
-from gymnasium.spaces import GraphInstance
 from torch_geometric.data import Data as PyGData
 from torch_geometric.data import Batch as PyGBatch
-from torch_geometric.data import InMemoryDataset
-from torch_geometric.loader import DataLoader
-from torch_geometric.utils import add_self_loops
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -25,7 +22,7 @@ from torch.distributions.categorical import Categorical
 from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
-from gym_utils.gym_wrapper import PlanetWarsForwardModelEnv, PlanetWarsForwardModelGNNEnv
+from gym_utils.gym_wrapper import PlanetWarsForwardModelEnv, PlanetWarsForwardModelGNNEnv, owner_one_hot_encoding
 from core.game_state import Player, GameParams
 from agents.mlp import PlanetWarsAgentMLP
 from agents.gnn import PlanetWarsAgentGNN, GraphInstanceToPyG
@@ -33,6 +30,7 @@ from agents.baseline_policies import GreedyPolicy,RandomPolicy, FocusPolicy, Def
 from agents.random_agents import CarefulRandomAgent
 from agents.better_greedy_heuristic_agent import BetterGreedyHeuristicAgent
 from gym_utils.self_play import NaiveSelfPlay
+from util.gnn_utils import preprocess_graph_data
 
 @dataclass
 class Args:
@@ -58,7 +56,7 @@ class Args:
     """the id of the environment. Filled in runtime, either `PlanetWarsForwardModel` or `PlanetWarsForwardModelGNN` according to agent type"""
     total_timesteps: int = 20000000
     """total timesteps of the experiments"""
-    learning_rate: float = 1e-5
+    learning_rate: float = 1e-3
     """the learning rate of the optimizer"""
     num_envs: int = 12
     """the number of parallel game environments"""
@@ -125,7 +123,7 @@ class Args:
     """The iteration to resume training from, for annealing purposes"""
 
     # Opponent configuration
-    opponent_type: str = "random"  # "random", "greedy", "focus", "defensive"
+    opponent_type: str = "greedy"  # "random", "greedy", "focus", "defensive"
     """type of opponent to train against"""
     self_play: str = None
 
@@ -326,13 +324,15 @@ if __name__ == "__main__":
 
     if args.agent_type == "gnn":
         agent = PlanetWarsAgentGNN(args).to(device)
-        agent.compile(dynamic=True, fullgraph=True)
-        if args.model_weights is not None:
-            state_dict = torch.load(args.model_weights, map_location=torch.device('cpu'), weights_only=False)
-            agent.load_state_dict(state_dict['model_state_dict'])
+        agent.compile(dynamic=True)
     else:
         agent = PlanetWarsAgentMLP(args).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
+
+    if args.model_weights is not None:
+        state_dict = torch.load(args.model_weights, map_location=torch.device('cpu'), weights_only=False)
+        agent.load_state_dict(state_dict['model_state_dict'])
+        optimizer.load_state_dict(state_dict['optimizer_state_dict'])
 
     if args.self_play == "naive":
         self_play = NaiveSelfPlay(player_id=2)
@@ -368,6 +368,8 @@ if __name__ == "__main__":
 
     # Start the game
     global_step = 0
+    if args.resume_iteration:
+        global_step = args.resume_iteration * args.num_envs * args.num_steps
     start_time = time.time()
     next_obs, _ = envs.reset(seed=args.seed)
     if args.flatten_observation:
@@ -386,10 +388,15 @@ if __name__ == "__main__":
     os.makedirs("models", exist_ok=True)
 
     ent_coef = args.ent_coef
+    start_iteration = 1
     if args.anneal_lr:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.num_iterations)
+        if args.resume_iteration:
+            for _ in range(args.resume_iteration):
+                scheduler.step()
+            start_iteration = args.resume_iteration + 1
 
-    for iteration in range(1, args.num_iterations + 1):
+    for iteration in range(start_iteration, args.num_iterations + 1):
         # Annealing the rate if instructed to do so
         # if args.anneal_lr:
             # frac = 1.0 - (iteration - 1.0) / args.num_iterations
@@ -414,9 +421,8 @@ if __name__ == "__main__":
                 if args.flatten_observation:
                     action, logprob, _, value = agent.get_action_and_value(next_obs)
                 else:
-                    input = PyGBatch.from_data_list(next_obs)
-                    input.edge_index, input.edge_attr = add_self_loops(input.edge_index, input.edge_attr, fill_value='mean')
-                    action, logprob, _, value = agent.get_action_and_value(input.to(device))
+                    input, source_mask = preprocess_graph_data(next_obs, agent.player_id, args.use_tick)
+                    action, logprob, _, value = agent.get_action_and_value(input.to(device), source_mask=source_mask.to(device))
                 values[step] = value.flatten()
             actions[step] = action
             logprobs[step] = logprob
@@ -521,8 +527,7 @@ if __name__ == "__main__":
             if args.flatten_observation:
                 next_value = agent.get_value(next_obs).reshape(1, -1)
             else:
-                input = PyGBatch.from_data_list(next_obs)
-                input.edge_index, input.edge_attr = add_self_loops(input.edge_index, input.edge_attr, fill_value='mean')
+                input = preprocess_graph_data(next_obs, agent.player_id, args.use_tick, return_mask=False)
                 next_value = agent.get_value(input.to(device)).reshape(1, -1)
             advantages = torch.zeros_like(rewards).to(device)
             lastgaelam = 0
@@ -560,7 +565,8 @@ if __name__ == "__main__":
                 if args.flatten_observation:
                     _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
                 else:
-                    _, newlogprob, entropy, newvalue = agent.get_action_and_value(PyGBatch.from_data_list([b_obs[idx] for idx in mb_inds]).to(device), b_actions[mb_inds])
+                    input, source_mask = preprocess_graph_data([b_obs[idx] for idx in mb_inds], agent.player_id, args.use_tick)
+                    _, newlogprob, entropy, newvalue = agent.get_action_and_value(input.to(device), b_actions[mb_inds], source_mask=source_mask.to(device))
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
 
@@ -683,6 +689,7 @@ if __name__ == "__main__":
         'model_state_dict': agent.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'args': args,
+        'scheduler_state_dict': scheduler.state_dict(),
     }, f"models/{args.run_name}_final.pt")
     if args.track:
         wandb.save(f"models/{args.run_name}_final.pt")

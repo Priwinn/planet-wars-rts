@@ -180,52 +180,52 @@ class PlanetWarsAgentGNN(nn.Module):
 
     def get_value(self, obs, batch_size=None):
         """Get state value"""
-        if isinstance(obs, Union[Tuple, List]):
-            obs = Batch.from_data_list(obs)
+        # if isinstance(obs, Union[Tuple, List]):
+        #     obs = Batch.from_data_list(obs)
         data, batch = obs, obs.batch
-        planet_owners = data.x[:, 0]
-        transporter_owners_per_edge = data.edge_attr[:, 0]
-        if self.args.use_tick:
-            x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id),
-                        data.x[:, 1:-1], data.tick[batch].unsqueeze(-1)), dim=-1)
-        else:
-            x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id),
-                        data.x[:, 1:-1]), dim=-1)
+        # planet_owners = data.x[:, 0]
+        # transporter_owners_per_edge = data.edge_attr[:, 0]
+        # if self.args.use_tick:
+        #     x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id),
+        #                 data.x[:, 1:-1], data.tick[batch].unsqueeze(-1)), dim=-1)
+        # else:
+        #     x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id),
+        #                 data.x[:, 1:-1]), dim=-1)
 
-        edge_attr=torch.cat((owner_one_hot_encoding(transporter_owners_per_edge, self.player_id),
-                            data.edge_attr[:, 1:]), dim=-1)
+        # edge_attr=torch.cat((owner_one_hot_encoding(transporter_owners_per_edge, self.player_id),
+        #                     data.edge_attr[:, 1:]), dim=-1)
 
-        value = self.forward_value_gnn(x, data.edge_index, edge_attr, batch, batch_size)
+        value = self.forward_value_gnn(data.x, data.edge_index, data.edge_attr, batch, batch_size)
         return value
 
 
-    def get_action_and_value(self, obs, action=None):
+    def get_action_and_value(self, obs, action=None, source_mask=None):
         """Get action probabilities and value"""
         if isinstance(obs, Union[Tuple, List]):
             obs = Batch.from_data_list(obs)
         elif isinstance(obs, Data) and not isinstance(obs, Batch):
             obs = Batch.from_data_list([obs])  # Ensure obs is a Batch object
         data, batch = obs, obs.batch
-        batch_size = batch.max().item() + 1
+        batch_size = obs.batch_size
         # Get number of nodes in each sample
         num_nodes = torch.scatter_reduce(torch.zeros(batch_size,dtype=int).to(batch.device),0,batch,torch.ones_like(batch),reduce='sum')
     
         # Get planet owners
-        planet_owners = data.x[:, 0]
-        transporter_owners_per_edge = data.edge_attr[:, 0]
-        transporter_owners = data.x[:, 3]
+        # planet_owners = data.x[:, 0]
+        # transporter_owners_per_edge = data.edge_attr[:, 0]
+        # transporter_owners = data.x[:, 3]
 
-        #one-hot encode planet owners and transporter owners
-        if self.args.use_tick:
-            data.x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id),
-                            data.x[:, 1:-1],
-                            data.tick[batch].unsqueeze(-1)),
-                            dim=-1)
-        else:
-            data.x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id),
-                            data.x[:, 1:-1]), dim=-1)
-        data.edge_attr = torch.cat((owner_one_hot_encoding(transporter_owners_per_edge, self.player_id),
-                                   data.edge_attr[:, 1:]), dim=-1)
+        # #one-hot encode planet owners and transporter owners
+        # if self.args.use_tick:
+        #     data.x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id),
+        #                     data.x[:, 1:-1],
+        #                     data.tick[batch].unsqueeze(-1)),
+        #                     dim=-1)
+        # else:
+        #     data.x = torch.cat((owner_one_hot_encoding(planet_owners, self.player_id),
+        #                     data.x[:, 1:-1]), dim=-1)
+        # data.edge_attr = torch.cat((owner_one_hot_encoding(transporter_owners_per_edge, self.player_id),
+        #                            data.edge_attr[:, 1:]), dim=-1)
         
         # Forward pass through GNN
         node_features, global_features = self.forward_gnn(data.x, data.edge_index, data.edge_attr, batch, batch_size)
@@ -234,7 +234,7 @@ class PlanetWarsAgentGNN(nn.Module):
 
         # Get per-node logits for source selection
         source_node_logits = self.source_actor(node_features).squeeze(-1)  # [num_nodes]
-        source_logits = to_dense_batch(source_node_logits, batch, fill_value=-1e8)[0]  # [batch_size, max_num_planets]
+        source_logits = to_dense_batch(source_node_logits, batch, fill_value=torch.finfo(torch.float32).min)[0]  # [batch_size, max_num_planets]
         
         # Get no-op action logits
         noop_logits = self.noop_actor(global_features)  # [batch_size]
@@ -244,8 +244,8 @@ class PlanetWarsAgentGNN(nn.Module):
         # Create masks
         # dense_planet_owners = to_dense_batch(planet_owners, batch, fill_value=-1)[0]
         # dense_transporter_owners = to_dense_batch(transporter_owners, batch, fill_value=-1)[0]
-        source_mask = to_dense_batch(torch.logical_and(planet_owners == 1, transporter_owners == 0), batch, fill_value=False)[0]
-        source_mask = torch.cat((torch.ones(batch_size, 1, dtype=torch.bool, device=source_mask.device), source_mask), dim=1)  # Add no-op mask
+        # source_mask = to_dense_batch(torch.logical_and(planet_owners == 1, transporter_owners == 0), batch, fill_value=False)[0]
+        # source_mask = torch.cat((torch.ones(batch_size, 1, dtype=torch.bool, device=source_mask.device), source_mask), dim=1)  # Add no-op mask
 
         # Create masked distributions for source selection
         source_probs = MaskedCategorical(logits=source_logits, mask=source_mask)
@@ -287,14 +287,14 @@ class PlanetWarsAgentGNN(nn.Module):
             target_logits = self.target_actor(target_features).squeeze(-1)  # [num_nodes]
 
             # Create target mask (opponent planets + neutral, but not source planet)
-            target_mask = torch.ones_like(planet_owners[valid_batch], dtype=torch.bool)  # All planets
+            target_mask = torch.ones(valid_batch.sum(), dtype=torch.bool, device=source_logits.device)  # All planets
             # target_mask = (planet_owners[valid_batch] != self.player_id).float()  # Not our planets
             # target_mask = (planet_owners[valid_batch] != 0).float()  # Not neutrals
             # target_mask = (planet_owners[valid_batch] == 3-self.player_id).float()  #Currently targetting only opponent planets yields better results
 
             dense_valid_batch_idx = torch.arange(valid_action_idx.sum(), device=source_logits.device).repeat_interleave(num_nodes[valid_action_idx])
-            dense_target_logits = to_dense_batch(target_logits, dense_valid_batch_idx, fill_value=-1e8)[0]  # [batch_size, max_num_planets]
-            
+            dense_target_logits = to_dense_batch(target_logits, dense_valid_batch_idx, fill_value=torch.finfo(torch.float32).min)[0]  # [batch_size, max_num_planets]
+
             # Prevent sending to self
             target_mask = to_dense_batch(target_mask, dense_valid_batch_idx, fill_value=0.0)[0]  # [batch_size, max_num_planets]
             target_mask[torch.arange(valid_action_idx.sum()), source_action[valid_action_idx]-1] = 0
