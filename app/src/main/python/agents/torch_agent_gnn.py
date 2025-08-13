@@ -5,6 +5,7 @@ import numpy as np
 
 import torch
 from torch_geometric.data import Data
+from torch_geometric.utils import add_self_loops
 
 from agents.planet_wars_agent import DEFAULT_OPPONENT, PlanetWarsPlayer
 from agents.mlp import PlanetWarsAgentMLP
@@ -29,7 +30,9 @@ class TorchAgentGNN(PlanetWarsPlayer):
     
     def get_action(self, game_state: GameState) -> Action:
 
-        x = self._get_observation(game_state)# Add batch dimension
+        x = self._get_observation(game_state)
+        x.edge_index, x.edge_attr = add_self_loops(x.edge_index, x.edge_attr, fill_value='mean')
+
 
         action = self.model.get_action(x)
         if action[0] == 0:

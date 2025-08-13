@@ -33,8 +33,6 @@ from agents.random_agents import CarefulRandomAgent
 from agents.better_greedy_heuristic_agent import BetterGreedyHeuristicAgent
 from gym_utils.self_play import NaiveSelfPlay
 
-
-
 @dataclass
 class Args:
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -63,17 +61,17 @@ class Args:
     """the learning rate of the optimizer"""
     num_envs: int = 12
     """the number of parallel game environments"""
-    num_steps: int = 1024
+    num_steps: int = 512
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
-    anneal_ent_coef: bool = False
+    anneal_ent_coef: bool = True
     """Toggle entropy coefficient annealing"""
     gamma: float = 0.995
     """the discount factor gamma"""
     gae_lambda: float = 0.95
     """the lambda for the general advantage estimation"""
-    num_minibatches: int = 96
+    num_minibatches: int = 48
     """the number of mini-batches"""
     update_epochs: int = 4
     """the K epochs to update the policy"""
@@ -112,7 +110,7 @@ class Args:
     """number of bins for the discretized ratio actor. Set to 0 to disable discretization"""
     new_map_each_run: bool = True
     """whether to create a new map for each run or use the same map"""
-    hidden_dim: int = 256
+    hidden_dim: int = 128
     """hidden dimension for the layers"""
     profile_path: str = None
     """Path to save profiling data, if None profiling is disabled"""
@@ -120,13 +118,15 @@ class Args:
     """if toggled, AsyncVectorEnv will be used"""
     use_tick: bool = False
     """if toggled, the game tick will be passed as an observation"""
-    model_weights: str = "models/PlanetWarsForwardModelGNN__ppo__random__1754768336_final.pt"
+    model_weights: str = "models/PlanetWarsForwardModelGNN__ppo__random__1755003037_iter_700.pt"
     """If specified, the initial model weights will be loaded from this path"""
+    resume_iteration: int = 701
+    """The iteration to resume training from, for annealing purposes"""
 
     # Opponent configuration
-    opponent_type: str = "better_greedy"  # "random", "greedy", "focus", "defensive"
+    opponent_type: str = "random"  # "random", "greedy", "focus", "defensive"
     """type of opponent to train against"""
-    self_play: str = None 
+    self_play: str = None
 
     # to be filled in runtime
     batch_size: int = 0
@@ -137,7 +137,6 @@ class Args:
     """the number of iterations (computed in runtime)"""
     run_name: str = 'temp'
     """the name of the run (computed in runtime)"""
-
 
 def make_env(env_id, idx, capture_video, run_name, device, args, self_play=None):
     def thunk():        
@@ -326,7 +325,7 @@ if __name__ == "__main__":
 
     if args.agent_type == "gnn":
         agent = PlanetWarsAgentGNN(args).to(device)
-        agent.compile(dynamic=True)
+        agent.compile(dynamic=True, fullgraph=True)
         if args.model_weights is not None:
             state_dict = torch.load(args.model_weights, map_location=torch.device('cpu'), weights_only=False)
             agent.load_state_dict(state_dict['model_state_dict'])
@@ -388,6 +387,7 @@ if __name__ == "__main__":
     ent_coef = args.ent_coef
     if args.anneal_lr:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.num_iterations)
+
     for iteration in range(1, args.num_iterations + 1):
         # Annealing the rate if instructed to do so
         # if args.anneal_lr:
@@ -413,7 +413,9 @@ if __name__ == "__main__":
                 if args.flatten_observation:
                     action, logprob, _, value = agent.get_action_and_value(next_obs)
                 else:
-                    action, logprob, _, value = agent.get_action_and_value(PyGBatch.from_data_list(next_obs).to(device))
+                    input = PyGBatch.from_data_list(next_obs)
+                    input.edge_index, input.edge_attr = add_self_loops(input.edge_index, input.edge_attr, fill_value='mean')
+                    action, logprob, _, value = agent.get_action_and_value(input.to(device))
                 values[step] = value.flatten()
             actions[step] = action
             logprobs[step] = logprob
@@ -430,8 +432,8 @@ if __name__ == "__main__":
                     obs[step+1] = [o for o in next_obs]  # Keep on cpu for dataloader
                 
             next_done = torch.Tensor(next_done).to(device)
-            if args.profile_path is not None:
-                profiler.step()  # Step the profiler if profiling is enabled
+            # if args.profile_path is not None:
+            #     profiler.step()  # Step the profiler if profiling is enabled
 
             # Log episode statistics
             if next_done.any():
@@ -518,7 +520,9 @@ if __name__ == "__main__":
             if args.flatten_observation:
                 next_value = agent.get_value(next_obs).reshape(1, -1)
             else:
-                next_value = agent.get_value(PyGBatch.from_data_list(next_obs).to(device)).reshape(1, -1)
+                input = PyGBatch.from_data_list(next_obs)
+                input.edge_index, input.edge_attr = add_self_loops(input.edge_index, input.edge_attr, fill_value='mean')
+                next_value = agent.get_value(input.to(device)).reshape(1, -1)
             advantages = torch.zeros_like(rewards).to(device)
             lastgaelam = 0
             for t in reversed(range(args.num_steps)):
@@ -597,6 +601,8 @@ if __name__ == "__main__":
                 loss.backward()
                 nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
                 optimizer.step()
+                if args.profile_path is not None:
+                    profiler.step()  # Step the profiler if profiling is enabled
 
             if args.target_kl is not None and approx_kl > args.target_kl:
                 print("Early stopping at epoch {}: reached target KL divergence".format(epoch))

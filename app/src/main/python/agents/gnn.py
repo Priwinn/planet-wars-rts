@@ -57,23 +57,23 @@ class PlanetWarsAgentGNN(nn.Module):
         
         # Graph Attention Network layers (edge features)
         self.a_gnn = PyGSequential('x, edge_index, edge_attr, batch', [
-            (layer_init_gat(GATv2Conv(self.node_feature_dim, self.hidden_dim, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+            (layer_init_gat(GATv2Conv(self.node_feature_dim, self.hidden_dim, heads=4, concat=True, edge_dim=5, add_self_loops=False)), 'x, edge_index, edge_attr -> x'),
             (MeanSubtractionNorm(), 'x, batch -> x'),
             nn.ReLU(),
             # (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
             # (MeanSubtractionNorm(), 'x, batch -> x'),
             # nn.ReLU(),
-            (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=1, concat=False, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+            (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=1, concat=False, edge_dim=5, add_self_loops=False)), 'x, edge_index, edge_attr -> x'),
         ])
 
         self.v_gnn = PyGSequential('x, edge_index, edge_attr, batch', [
-            (layer_init_gat(GATv2Conv(self.node_feature_dim, self.hidden_dim, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
+            (layer_init_gat(GATv2Conv(self.node_feature_dim, self.hidden_dim, heads=4, concat=True, edge_dim=5, add_self_loops=False)), 'x, edge_index, edge_attr -> x'),
             (MeanSubtractionNorm(), 'x, batch -> x'),
             nn.ReLU(),
             # (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=4, concat=True, edge_dim=5)), 'x, edge_index, edge_attr -> x'),
             # (MeanSubtractionNorm(), 'x, batch -> x'),
             # nn.ReLU(),
-            (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=1, concat=False, edge_dim=5)), 'x, edge_index, edge_attr  -> x'),
+            (layer_init_gat(GATv2Conv(self.hidden_dim*4, self.hidden_dim, heads=1, concat=False, edge_dim=5, add_self_loops=False)), 'x, edge_index, edge_attr  -> x'),
         ])
 
         #Residual Gated Graph Conv layers
@@ -140,7 +140,7 @@ class PlanetWarsAgentGNN(nn.Module):
                 layer_init(nn.Linear(32, self.args.discretized_ratio_bins), std=0.01),
             )
 
-    def forward_gnn(self, x, edge_index, edge_attr, batch=None):
+    def forward_gnn(self, x, edge_index, edge_attr, batch=None, batch_size=None):
         """Forward pass through GNN layers"""
         # GNN forward pass
         h = self.a_gnn(x, edge_index, edge_attr, batch)
@@ -154,13 +154,13 @@ class PlanetWarsAgentGNN(nn.Module):
             global_features = torch.mean(h, dim=0, keepdim=True)
         else:
             # Batch case
-            global_features = self.global_pool(h, batch)
+            global_features = self.global_pool(h, batch, batch_size)
         
         # global_features = self.a_global_mlp(global_features)
         
         return h, global_features
-    
-    def forward_value_gnn(self, x, edge_index, edge_attr, batch=None):
+
+    def forward_value_gnn(self, x, edge_index, edge_attr, batch=None, batch_size=None):
         """Forward pass through GNN layers for value estimation"""
         # GNN forward pass
         h = self.v_gnn(x, edge_index, edge_attr, batch)
@@ -171,14 +171,14 @@ class PlanetWarsAgentGNN(nn.Module):
             global_features = torch.mean(h, dim=0, keepdim=True)
         else:
             # Batch case
-            global_features = self.global_pool(h, batch)
+            global_features = self.global_pool(h, batch, batch_size)
 
         value = self.critic(global_features)
 
         return value
 
 
-    def get_value(self, obs):
+    def get_value(self, obs, batch_size=None):
         """Get state value"""
         if isinstance(obs, Union[Tuple, List]):
             obs = Batch.from_data_list(obs)
@@ -195,7 +195,7 @@ class PlanetWarsAgentGNN(nn.Module):
         edge_attr=torch.cat((owner_one_hot_encoding(transporter_owners_per_edge, self.player_id),
                             data.edge_attr[:, 1:]), dim=-1)
 
-        value = self.forward_value_gnn(x, data.edge_index, edge_attr, batch)
+        value = self.forward_value_gnn(x, data.edge_index, edge_attr, batch, batch_size)
         return value
 
 
@@ -203,7 +203,7 @@ class PlanetWarsAgentGNN(nn.Module):
         """Get action probabilities and value"""
         if isinstance(obs, Union[Tuple, List]):
             obs = Batch.from_data_list(obs)
-        elif isinstance(obs, Data):
+        elif isinstance(obs, Data) and not isinstance(obs, Batch):
             obs = Batch.from_data_list([obs])  # Ensure obs is a Batch object
         data, batch = obs, obs.batch
         batch_size = batch.max().item() + 1
@@ -228,9 +228,9 @@ class PlanetWarsAgentGNN(nn.Module):
                                    data.edge_attr[:, 1:]), dim=-1)
         
         # Forward pass through GNN
-        node_features, global_features = self.forward_gnn(data.x, data.edge_index, data.edge_attr, batch)
+        node_features, global_features = self.forward_gnn(data.x, data.edge_index, data.edge_attr, batch, batch_size)
         # Get value from GNN
-        value = self.forward_value_gnn(data.x, data.edge_index, data.edge_attr, batch)
+        value = self.forward_value_gnn(data.x, data.edge_index, data.edge_attr, batch, batch_size)
 
         # Get per-node logits for source selection
         source_node_logits = self.source_actor(node_features).squeeze(-1)  # [num_nodes]
@@ -242,9 +242,9 @@ class PlanetWarsAgentGNN(nn.Module):
         source_logits = torch.cat((noop_logits, source_logits), dim=1)  # [batch_size, num_planets + 1]
 
         # Create masks
-        dense_planet_owners = to_dense_batch(planet_owners, batch, fill_value=-1)[0]
-        dense_transporter_owners = to_dense_batch(transporter_owners, batch, fill_value=-1)[0]
-        source_mask = torch.logical_and(dense_planet_owners == 1, dense_transporter_owners == 0) 
+        # dense_planet_owners = to_dense_batch(planet_owners, batch, fill_value=-1)[0]
+        # dense_transporter_owners = to_dense_batch(transporter_owners, batch, fill_value=-1)[0]
+        source_mask = to_dense_batch(torch.logical_and(planet_owners == 1, transporter_owners == 0), batch, fill_value=False)[0]
         source_mask = torch.cat((torch.ones(batch_size, 1, dtype=torch.bool, device=source_mask.device), source_mask), dim=1)  # Add no-op mask
 
         # Create masked distributions for source selection

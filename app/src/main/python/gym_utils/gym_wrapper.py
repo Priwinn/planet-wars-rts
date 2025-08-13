@@ -139,6 +139,8 @@ class PlanetWarsForwardModelEnv(gym.Env):
 
     def reset(self, **kwargs) -> Tuple[Data, Dict[str, Any]]:
         """Reset the environment and return initial observation"""
+        self.game_params['initialNeutralRatio'] = np.random.uniform(0.25, 0.35)
+        self.game_params['transporterSpeed'] = np.random.uniform(2.0, 5.0)
         self.bridge.create_new_game(self.game_params)
         initial_state = self.bridge.get_game_state()
         
@@ -229,8 +231,9 @@ class PlanetWarsForwardModelEnv(gym.Env):
         planets = current_state['planets']
         
         # # Validate source planet
-        # if source_planet >= len(planets):
-        #     return Action.do_nothing()
+        if source_planet >= len(planets):
+            print(f"Invalid source planet: {source_planet} for number of planets {len(planets)}")
+            return Action.do_nothing()
         
         source_planet_data = planets[source_planet]
         
@@ -247,8 +250,9 @@ class PlanetWarsForwardModelEnv(gym.Env):
         #     return Action.do_nothing()
         
         # # Validate target planet (can't send to self)
-        # if target_planet == source_planet or target_planet >= len(planets):
-        #     return Action.do_nothing()
+        if target_planet == source_planet or target_planet >= len(planets):
+            print(f"Invalid target planet: {target_planet} for source planet: {source_planet}, and number of planets {len(planets)}")
+            return Action.do_nothing()
         
         return Action(
             player_id=self.controlled_player,
