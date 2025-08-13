@@ -14,6 +14,7 @@ from torch_geometric.data import Data as PyGData
 from torch_geometric.data import Batch as PyGBatch
 from torch_geometric.data import InMemoryDataset
 from torch_geometric.loader import DataLoader
+from torch_geometric.utils import add_self_loops
 import numpy as np
 import torch
 import torch.nn as nn
