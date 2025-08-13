@@ -363,25 +363,25 @@ class PlanetWarsAgentGNN(nn.Module):
         
         return action, total_logprob, total_entropy, value
 
-    def get_action(self, data):
+    def get_action(self, data, source_mask):
         with torch.no_grad():
             # Get masks from node features (owner is first feature)
             num_planets = data.x.size(0)
-            planet_owners = data.x[:, 0].unsqueeze(0)  # [1, num_planets]
-            transporter_owners_per_edge = data.edge_attr[:, 0].view(num_planets,num_planets-1).unsqueeze(0) # [1, num_planets, num_planets-1]
-            transporter_owners = torch.sum(transporter_owners_per_edge, dim=2) > 0  # [1, num_planets]
+            # planet_owners = data.x[:, 0].unsqueeze(0)  # [1, num_planets]
+            # transporter_owners_per_edge = data.edge_attr[:, 0].view(num_planets,num_planets-1).unsqueeze(0) # [1, num_planets, num_planets-1]
+            # transporter_owners = torch.sum(transporter_owners_per_edge, dim=2) > 0  # [1, num_planets]
 
             #one-hot encode planet owners and transporter owners
-            if self.args.use_tick:
-                data.x = torch.cat((owner_one_hot_encoding(planet_owners.view(-1), self.player_id),
-                                data.x[:, 1:-1],
-                                data.tick[0].unsqueeze(-1)),
-                                dim=-1)
-            else:
-                data.x = torch.cat((owner_one_hot_encoding(planet_owners.view(-1), self.player_id),
-                                    data.x[:, 1:-1]), dim=-1)
-            data.edge_attr = torch.cat((owner_one_hot_encoding(transporter_owners_per_edge.view(-1), self.player_id),
-                                    data.edge_attr[:, 1:]), dim=-1)
+            # if self.args.use_tick:
+            #     data.x = torch.cat((owner_one_hot_encoding(planet_owners.view(-1), self.player_id),
+            #                     data.x[:, 1:-1],
+            #                     data.tick[0].unsqueeze(-1)),
+            #                     dim=-1)
+            # else:
+            #     data.x = torch.cat((owner_one_hot_encoding(planet_owners.view(-1), self.player_id),
+            #                         data.x[:, 1:-1]), dim=-1)
+            # data.edge_attr = torch.cat((owner_one_hot_encoding(transporter_owners_per_edge.view(-1), self.player_id),
+            #                         data.edge_attr[:, 1:]), dim=-1)
 
             node_features, global_features = self.forward_gnn(data.x, data.edge_index, data.edge_attr)
 
@@ -395,8 +395,8 @@ class PlanetWarsAgentGNN(nn.Module):
             source_logits = torch.cat((noop_logits, source_logits), dim=1)  # [1, num_planets + 1]
 
             # Create masks - same as get_action_and_value
-            source_mask = torch.logical_and(planet_owners == self.player_id, transporter_owners == 0)
-            source_mask = torch.cat((torch.ones(1, 1, dtype=torch.bool, device=source_mask.device), source_mask), dim=1)  # Add no-op mask
+            # source_mask = torch.logical_and(planet_owners == self.player_id, transporter_owners == 0)
+            # source_mask = torch.cat((torch.ones(1, 1, dtype=torch.bool, device=source_mask.device), source_mask), dim=1)  # Add no-op mask
 
             # Create masked distributions for source selection
             source_probs = MaskedCategorical(logits=source_logits, mask=source_mask)
@@ -420,7 +420,7 @@ class PlanetWarsAgentGNN(nn.Module):
                 target_logits = self.target_actor(target_features).squeeze(-1).unsqueeze(0)  # [1, num_planets]
 
                 # Create target mask (opponent planets only, same as get_action_and_value)
-                target_mask = torch.ones_like(planet_owners, dtype=torch.bool)  # All planets
+                target_mask = torch.ones(num_planets, dtype=torch.bool, device=source_logits.device)  # All planets
                 # target_mask = (planet_owners != self.player_id).float()  # Not our planets
                 # target_mask = (planet_owners != 0).float()  # Not neutrals
                 # target_mask = (planet_owners == 3-self.player_id).float()  # Only opponent planets

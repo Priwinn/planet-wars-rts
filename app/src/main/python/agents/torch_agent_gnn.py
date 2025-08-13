@@ -14,6 +14,8 @@ from core.game_state import GameState, Action, Player, GameParams, Planet, Trans
 from core.game_state_factory import GameStateFactory
 import time
 
+from util.gnn_utils import preprocess_graph_data
+
 
 class TorchAgentGNN(PlanetWarsPlayer):
     def __init__(self, model_class=None, weights_path: Optional[str] = None):
@@ -31,10 +33,10 @@ class TorchAgentGNN(PlanetWarsPlayer):
     def get_action(self, game_state: GameState) -> Action:
 
         x = self._get_observation(game_state)
-        x.edge_index, x.edge_attr = add_self_loops(x.edge_index, x.edge_attr, fill_value='mean')
+        x, source_mask = preprocess_graph_data([x], self.player_id, use_tick=self.model.args.use_tick, return_mask=True)
 
 
-        action = self.model.get_action(x)
+        action = self.model.get_action(x, source_mask=source_mask)
         if action[0] == 0:
             # No-op action, return None
             return Action.do_nothing()
