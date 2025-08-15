@@ -8,7 +8,6 @@ from torch_geometric.nn.norm import MeanSubtractionNorm
 from torch_geometric.data import Data, Batch
 from torch_geometric.utils import to_dense_batch, select
 from typing import Tuple, Union, List
-from gym_utils.gym_wrapper import owner_one_hot_encoding
 from gym_utils.distributions import MaskedCategorical, SigmoidTransformedDistribution
 
 import numpy as np
@@ -420,7 +419,7 @@ class PlanetWarsAgentGNN(nn.Module):
                 target_logits = self.target_actor(target_features).squeeze(-1).unsqueeze(0)  # [1, num_planets]
 
                 # Create target mask (opponent planets only, same as get_action_and_value)
-                target_mask = torch.ones(num_planets, dtype=torch.bool, device=source_logits.device)  # All planets
+                target_mask = torch.ones((1, num_planets), dtype=torch.bool, device=source_logits.device)  # All planets
                 # target_mask = (planet_owners != self.player_id).float()  # Not our planets
                 # target_mask = (planet_owners != 0).float()  # Not neutrals
                 # target_mask = (planet_owners == 3-self.player_id).float()  # Only opponent planets

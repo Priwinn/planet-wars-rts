@@ -1,8 +1,16 @@
 import torch
 from torch_geometric.data import Data as PyGData, Batch as PyGBatch
 from torch_geometric.utils import to_dense_batch, add_self_loops
-from gym_utils.gym_wrapper import owner_one_hot_encoding
 
+def owner_one_hot_encoding(owner: torch.Tensor, player_id: int) -> torch.Tensor:
+    """Convert owner integer to one-hot encoding. Assume Neutral=0, Controlled=1, Opponent=2 (swaps controlled and opponent if needed)"""
+    one_hot = torch.nn.functional.one_hot(
+        owner.long(), num_classes=3
+    )
+    # Swap controlled and opponent if needed
+    if player_id == 2:
+        one_hot = one_hot[..., [0, 2, 1]]
+    return one_hot
 
 def preprocess_graph_data(graph_data: list[PyGData], 
                           player_id: int,

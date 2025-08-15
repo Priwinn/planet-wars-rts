@@ -11,18 +11,10 @@ from agents.planet_wars_agent import PlanetWarsPlayer
 from gym_utils.self_play import SelfPlayBase
 from gym_utils.KotlinForwardModelBridge import KotlinForwardModelBridge
 from gym_utils.PythonForwardModelBridge import PythonForwardModelBridge
+from util.gnn_utils import preprocess_graph_data, owner_one_hot_encoding
 from torch_geometric.data import Data
 from core.game_state import Player, Action
 
-def owner_one_hot_encoding(owner: torch.Tensor, player_id: int) -> torch.Tensor:
-    """Convert owner integer to one-hot encoding. Assume Neutral=0, Controlled=1, Opponent=2 (swaps controlled and opponent if needed)"""
-    one_hot = torch.nn.functional.one_hot(
-        owner.long(), num_classes=3
-    )
-    # Swap controlled and opponent if needed
-    if player_id == 2:
-        one_hot = one_hot[..., [0, 2, 1]]
-    return one_hot
 
 def tensor_to_action(tensor: torch.Tensor, player_id: Player) -> Action:
     """Convert a tensor to an Action object"""
@@ -99,8 +91,8 @@ class PlanetWarsForwardModelEnv(gym.Env):
         
         # Get initial state to number of planets
         self.bridge.create_new_game(self.game_params)
-        initial_state = self.bridge.get_game_state()
-        self.num_planets = len(initial_state['planets'])
+        self.current_game_state = self.bridge.get_game_state()
+        self.num_planets = len(self.current_game_state['planets'])
         self.edge_index = torch.Tensor([[i, j] for i in range(self.num_planets) for j in range(self.num_planets) if i != j]).long().permute(1, 0)
         
         
@@ -143,6 +135,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
         self.game_params['transporterSpeed'] = np.random.uniform(2.0, 5.0)
         self.bridge.create_new_game(self.game_params)
         initial_state = self.bridge.get_game_state()
+
         
         obs = self._get_observation()
 
@@ -167,14 +160,14 @@ class PlanetWarsForwardModelEnv(gym.Env):
         if self.self_play:
             device = next(self.opponent_policy.parameters()).device  # Same device as opponent, assume it is a PyTorch model
             obs = self._get_observation().to(device=device)
-            opponent_action = self.opponent_policy.get_action(obs)
+            obs, source_mask = preprocess_graph_data([obs], self.player_int, use_tick=self.args.use_tick, return_mask=True)
+            opponent_action = self.opponent_policy.get_action(obs, source_mask)
             opponent_action = self._convert_gym_action_to_game_action(opponent_action)
             
         elif isinstance(self.opponent_policy, PlanetWarsPlayer):
             opponent_action = self.opponent_policy.get_action(self.bridge.game_state)
         elif callable(self.opponent_policy):
-            current_state = self.bridge.get_game_state()
-            opponent_action = self.opponent_policy(current_state)
+            opponent_action = self.opponent_policy(self.current_game_state)
             
         # Create actions dict
         actions = {}
@@ -182,17 +175,17 @@ class PlanetWarsForwardModelEnv(gym.Env):
         actions[self.opponent_player] = opponent_action
         
         # Step the forward model
-        valid_actions_bool = are_there_valid_actions(self.bridge.get_game_state(), self.player_int)
-        game_state = self.bridge.step(actions)
+        valid_actions_bool = are_there_valid_actions(self.current_game_state, self.player_int)
+        self.current_game_state = self.bridge.step(actions)
         
         # Calculate reward based on current state
-        reward = self._calculate_reward(game_state)
-        
+        reward = self._calculate_reward(self.current_game_state)
+
         # Check if done
-        done = game_state['isTerminal'] or game_state['tick'] >= self.max_ticks
-        
+        done = self.current_game_state['isTerminal'] or self.current_game_state['tick'] >= self.max_ticks
+
         # Check truncation
-        truncated = game_state['tick'] >= self.max_ticks and not game_state['isTerminal']
+        truncated = self.current_game_state['tick'] >= self.max_ticks and not self.current_game_state['isTerminal']
 
         # Penalize for no-op actions if there is a planet to send ships from
         if controlled_action.source_planet_id == -1 and valid_actions_bool:
@@ -200,16 +193,16 @@ class PlanetWarsForwardModelEnv(gym.Env):
 
         # Additional info
         info = {
-            'tick': game_state['tick'],
-            'leader': game_state['leader'],
-            'status': game_state.get('statusString', ''),
-            'player1Ships': game_state['player1Ships'],
-            'player2Ships': game_state['player2Ships'],
+            'tick': self.current_game_state['tick'],
+            'leader': self.current_game_state['leader'],
+            'status': self.current_game_state.get('statusString', ''),
+            'player1Ships': self.current_game_state['player1Ships'],
+            'player2Ships': self.current_game_state['player2Ships'],
             'controlled_player': self.player_int,
             'opponent_player': self.opponent_int
         }
         if done: 
-            print(f"Game over at tick {game_state['tick']}, leader: {game_state['leader']}")
+            print(f"Game over at tick {self.current_game_state['tick']}, leader: {self.current_game_state['leader']}")
 
 
 
@@ -226,10 +219,8 @@ class PlanetWarsForwardModelEnv(gym.Env):
         else:
             source_planet -= 1  # -1 to account for no-op action
         
-        # Get current game state to check planet ownership and ships
-        current_state = self.bridge.get_game_state()
-        planets = current_state['planets']
-        
+        planets = self.current_game_state['planets']
+
         # # Validate source planet
         if source_planet >= len(planets):
             print(f"Invalid source planet: {source_planet} for number of planets {len(planets)}")
@@ -265,14 +256,13 @@ class PlanetWarsForwardModelEnv(gym.Env):
     
     def _get_observation(self) -> Data:
         """Create graph observation from current game state"""
-        game_state = self.bridge.get_game_state()
-        planets = game_state['planets']
+        planets = self.current_game_state['planets']
         node_features = torch.Tensor(np.stack([self._get_planet_features(p) for p in planets], axis=0))
 
         return Data(
             x = node_features,
             edge_index=self.edge_index,
-            tick=torch.tensor(game_state['tick'] / self.game_params['maxTicks'], dtype=torch.float32)
+            tick=torch.tensor(self.current_game_state['tick'] / self.game_params['maxTicks'], dtype=torch.float32)
         )
     
     def _owner_one_hot_encoding(self, owner: torch.Tensor) -> torch.Tensor:
@@ -491,8 +481,8 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
             self.game_params['numPlanets'] = np.random.randint(self.args.num_planets_min, self.args.num_planets_max + 1)
 
         self.bridge.create_new_game(self.game_params)
-        initial_state = self.bridge.get_game_state()
-        self.num_planets = len(initial_state['planets'])
+        self.current_game_state = self.bridge.get_game_state()
+        self.num_planets = len(self.current_game_state['planets'])
         if self.args.num_planets is None:
             self.edge_index = torch.Tensor([[i, j] for i in range(self.num_planets) for j in range(self.num_planets) if i != j]).long().permute(1, 0)
         print(f"Number of planets: {self.num_planets}")
@@ -508,11 +498,11 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
         if self.self_play:
             self.opponent_policy = self.self_play.get_opponent()
         return obs, {
-            'tick': initial_state['tick'],
-            'leader': initial_state['leader'],
+            'tick': self.current_game_state['tick'],
+            'leader': self.current_game_state['leader'],
             'status': 'Game started',
-            'player1Ships': initial_state['player1Ships'],
-            'player2Ships': initial_state['player2Ships']
+            'player1Ships': self.current_game_state['player1Ships'],
+            'player2Ships': self.current_game_state['player2Ships']
         }
 
     def _get_observation(self) -> Data:
@@ -520,8 +510,7 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
             self.edge_attr = torch.Tensor(np.stack(
                 [self._get_default_edge_features(edge[0], edge[1]) for edge in self.edge_index.permute(1, 0).numpy()]
             ))
-        game_state = self.bridge.get_game_state()
-        planets = game_state['planets']
+        planets = self.current_game_state['planets']
         node_features = torch.Tensor(np.stack([self._get_planet_features(p) for p in planets], axis=0))
 
         edge_features = self.edge_attr.detach().clone()
@@ -533,7 +522,7 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
             x=node_features,
             edge_index=self.edge_index,
             edge_attr=edge_features,
-            tick=game_state['tick'] / self.game_params['maxTicks']
+            tick=self.current_game_state['tick'] / self.game_params['maxTicks']
         )
 
 
@@ -566,8 +555,7 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
         return np.array([0.0,0.0, weight], dtype=np.float32)
     def _get_planet_by_id(self, planet_id: int) -> Dict[str, Any]:
         """Get planet data by ID"""
-        game_state = self.bridge.get_game_state()
-        for planet in game_state['planets']:
+        for planet in self.current_game_state['planets']:
             if planet['id'] == planet_id:
                 return planet
         raise ValueError(f"Planet with ID {planet_id} not found in game state")
