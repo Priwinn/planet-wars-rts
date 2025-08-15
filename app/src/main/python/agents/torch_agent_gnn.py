@@ -1,6 +1,6 @@
 import random
 from typing import Optional, Dict, Any
-from agents.ppo import Args 
+from config.ppo_config import Args 
 import numpy as np
 
 import torch
@@ -18,16 +18,19 @@ from util.gnn_utils import preprocess_graph_data
 
 
 class TorchAgentGNN(PlanetWarsPlayer):
-    def __init__(self, model_class=None, weights_path: Optional[str] = None):
+    def __init__(self, model_class=None, weights_path: Optional[str] = None, model = None):
         super().__init__()
         self.model_class = model_class
         self.weights_path = weights_path
-        state_dict = torch.load(weights_path, map_location=torch.device('cpu'), weights_only=False)
-        self.model = model_class(state_dict['args'])
-        is_compiled_weights = any('_orig_mod.' in key for key in state_dict['model_state_dict'].keys())
-        if is_compiled_weights:
-            self.model = torch.compile(self.model, dynamic=True)
-        self.model.load_state_dict(state_dict['model_state_dict']) if model_class and weights_path else None
+        if model is not None:
+            self.model = model
+        else:
+            state_dict = torch.load(weights_path, map_location=torch.device('cpu'), weights_only=False)
+            self.model = model_class(state_dict['args'])
+            is_compiled_weights = any('_orig_mod.' in key for key in state_dict['model_state_dict'].keys())
+            if is_compiled_weights:
+                self.model = torch.compile(self.model, dynamic=True)
+            self.model.load_state_dict(state_dict['model_state_dict']) if model_class and weights_path else None
 
         self.initial_game_state = None
         self.edge_attr = None
@@ -143,7 +146,7 @@ class TorchAgentGNN(PlanetWarsPlayer):
         params.num_planets = params.num_planets - params.num_planets % 2  # Ensure even number of planets
         self.edge_index = torch.Tensor([[i, j] for i in range(params.num_planets) for j in range(params.num_planets) if i != j]).long().permute(1, 0)
         self.initial_game_state = None
-        return super().prepare_to_play_as(player, params, opponent)
+        return super().prepare_to_play_as(player=player, params=params, opponent=opponent)
         
     
 

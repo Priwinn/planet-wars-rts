@@ -27,115 +27,13 @@ from core.game_state import Player, GameParams
 from agents.mlp import PlanetWarsAgentMLP
 from agents.gnn import PlanetWarsAgentGNN, GraphInstanceToPyG
 from agents.baseline_policies import GreedyPolicy,RandomPolicy, FocusPolicy, DefensivePolicy
-from agents.random_agents import CarefulRandomAgent
+from agents.random_agents import CarefulRandomAgent, PureRandomAgent
+from agents.greedy_heuristic_agent import GreedyHeuristicAgent
 from agents.better_greedy_heuristic_agent import BetterGreedyHeuristicAgent
-from gym_utils.self_play import NaiveSelfPlay
+from agents.torch_agent_gnn import TorchAgentGNN
+from gym_utils.self_play import get_self_play_class
 from util.gnn_utils import preprocess_graph_data, owner_one_hot_encoding
-
-@dataclass
-class Args:
-    exp_name: str = os.path.basename(__file__)[: -len(".py")]
-    """the name of this experiment"""
-    seed: int = 1
-    """seed of the experiment"""
-    torch_deterministic: bool = True
-    """if toggled, `torch.backends.cudnn.deterministic=False`"""
-    cuda: bool = True
-    """if toggled, cuda will be enabled by default"""
-    track: bool = True
-    """if toggled, this experiment will be tracked with Weights and Biases"""
-    wandb_project_name: str = "planet-wars-ppo"
-    """the wandb's project name"""
-    wandb_entity: str = None
-    """the entity (team) of wandb's project"""
-    capture_video: bool = False
-    """whether to capture videos of the agent performances (check out `videos` folder)"""
-
-    # Algorithm specific arguments
-    env_id: str = "PlanetWarsForwardModel"
-    """the id of the environment. Filled in runtime, either `PlanetWarsForwardModel` or `PlanetWarsForwardModelGNN` according to agent type"""
-    total_timesteps: int = 20000000
-    """total timesteps of the experiments"""
-    learning_rate: float = 2.5e-4
-    """the learning rate of the optimizer"""
-    num_envs: int = 24
-    """the number of parallel game environments"""
-    num_steps: int = 1024
-    """the number of steps to run in each environment per policy rollout"""
-    anneal_lr: bool = True
-    """Toggle learning rate annealing for policy and value networks"""
-    anneal_ent_coef: bool = True
-    """Toggle entropy coefficient annealing"""
-    gamma: float = 0.995
-    """the discount factor gamma"""
-    gae_lambda: float = 0.95
-    """the lambda for the general advantage estimation"""
-    num_minibatches: int = 96
-    """the number of mini-batches"""
-    update_epochs: int = 4
-    """the K epochs to update the policy"""
-    norm_adv: bool = True
-    """Toggles advantages normalization"""
-    clip_coef: float = 0.2
-    """the surrogate clipping coefficient"""
-    clip_vloss: bool = True
-    """Toggles whether or not to use a clipped loss for the value function, as per the paper."""
-    ent_coef: float = 0.01
-    """coefficient of the entropy"""
-    vf_coef: float = 1.3
-    """coefficient of the value function"""
-    max_grad_norm: float = 3.5
-    """the maximum norm for the gradient clipping"""
-    target_kl: float = None
-    """the target KL divergence threshold"""
-
-    # Planet Wars specific
-    agent_type: str = "gnn"  # "mlp" or "gnn"
-    num_planets: int = None
-    """number of planets in the game. If None, will be set to a random value between num_planets_min and num_planets_max (new_map_each_run needs to be set to true)"""
-    num_planets_min: int = 10
-    """minimum number of planets in the game"""
-    num_planets_max: int = 30
-    """maximum number of planets in the game"""
-    node_feature_dim: int = 0 #Filled in runtime 5 for gnn, 14 for mlp
-    """dimension of node features (owner, ship_count, growth_rate, x, y)"""
-    max_ticks: int = 2000
-    """maximum game ticks"""
-    use_adjacency_matrix: bool = False
-    """whether to include adjacency matrix in observations"""
-    flatten_observation: bool = True
-    """Filled on run time, mlp uses flattened observation, gnn uses graph observation"""
-    discretized_ratio_bins: int = 0
-    """number of bins for the discretized ratio actor. Set to 0 to disable discretization"""
-    new_map_each_run: bool = True
-    """whether to create a new map for each run or use the same map"""
-    hidden_dim: int = 256
-    """hidden dimension for the layers"""
-    profile_path: str = None
-    """Path to save profiling data, if None profiling is disabled"""
-    use_async: bool = True
-    """if toggled, AsyncVectorEnv will be used"""
-    use_tick: bool = False
-    """if toggled, the game tick will be passed as an observation"""
-    model_weights: str = None #"models/PlanetWarsForwardModelGNN__ppo__random__1755003037_iter_700.pt"
-    """If specified, the initial model weights will be loaded from this path"""
-    resume_iteration: int = None
-    """The iteration to resume training from, for annealing purposes"""
-
-    # Opponent configuration
-    opponent_type: str = "random"  # "random", "greedy", "focus", "defensive"
-    """type of opponent to train against"""
-    self_play: str = None
-
-    # to be filled in runtime
-    batch_size: int = 0
-    """the batch size (computed in runtime)"""
-    minibatch_size: int = 0
-    """the mini-batch size (computed in runtime)"""
-    num_iterations: int = 0
-    """the number of iterations (computed in runtime)"""
-    run_name: str = 'temp'
-    """the name of the run (computed in runtime)"""
+from config.ppo_config import Args
 
 def make_env(env_id, idx, capture_video, run_name, device, args, self_play=None):
     def thunk():        
@@ -178,7 +76,7 @@ def make_env(env_id, idx, capture_video, run_name, device, args, self_play=None)
                     'maxGrowthRate': 0.2,
                     'initialNeutralRatio': np.random.uniform(0.25, 0.35)
                 },
-                self_play= self_play if args.self_play == "naive" else None
+                self_play= self_play if args.self_play else None
             )
         if args.opponent_type == "greedy":
             env.set_opponent_policy(GreedyPolicy(game_params=env.game_params, player=Player.Player2))
@@ -334,9 +232,10 @@ if __name__ == "__main__":
         agent.load_state_dict(state_dict['model_state_dict'])
         optimizer.load_state_dict(state_dict['optimizer_state_dict'])
 
-    if args.self_play == "naive":
-        self_play = NaiveSelfPlay(player_id=2)
-        self_play.add_opponent(agent)
+    if args.self_play:
+        self_play = get_self_play_class(args.self_play)(player_id=2)
+        self_play.add_opponent(TorchAgentGNN(model=agent.copy_as_opponent().to('cpu')))
+        args.use_async = False # Override async setting for self-play
     else:
         self_play = None
 
@@ -462,7 +361,7 @@ if __name__ == "__main__":
                         recent_win_rate = np.mean(win_rate[-50:]) if len(win_rate) >= 50 else np.mean(win_rate) if win_rate else 0.0
                         writer.add_scalar("charts/win_rate", recent_win_rate, global_step)
                          # Reset curriculum step if win rate is good and move to next curriculum step
-                        if recent_win_rate >= 0.8 and lesson_episode_count >= 50 and args.opponent_type == "random":
+                        if recent_win_rate >= 0.8 and lesson_episode_count >= 50 and args.opponent_type == "random" and not args.self_play:
                             args.opponent_type = "greedy"  # Switch to greedy opponent
                             print(f"Lesson completed in {curriculum_step} steps, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
                             curriculum_step = 0
@@ -470,7 +369,7 @@ if __name__ == "__main__":
                             lesson_number += 1
                             envs.close()
                             envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
-                        if recent_win_rate >= 0.8 and lesson_episode_count >= 50 and args.opponent_type == "greedy":
+                        if recent_win_rate >= 0.8 and lesson_episode_count >= 50 and args.opponent_type == "greedy" and not args.self_play:
                             args.opponent_type = "careful_random"  # Switch to careful random opponent
                             print(f"Lesson completed in {curriculum_step} steps, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
                             curriculum_step = 0
@@ -478,7 +377,7 @@ if __name__ == "__main__":
                             lesson_number += 1
                             envs.close()
                             envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
-                        if recent_win_rate >= 0.8 and lesson_episode_count >= 50 and args.opponent_type == "careful_random":
+                        if recent_win_rate >= 0.8 and lesson_episode_count >= 50 and args.opponent_type == "careful_random" and not args.self_play:
                             args.opponent_type = "better_greedy"  # Switch to better greedy opponent
                             print(f"Lesson completed in {curriculum_step} steps, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
                             curriculum_step = 0
@@ -487,9 +386,9 @@ if __name__ == "__main__":
                             envs.close()
                             envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
 
-                        if (recent_win_rate >= 0.8 and lesson_episode_count >= 50 and args.opponent_type == "better_greedy"):
-                            args.self_play = "naive"  # Switch to self-play
-                            self_play = NaiveSelfPlay(player_id=2)
+                        if (recent_win_rate >= 0.8 and lesson_episode_count >= 50 and args.opponent_type == "better_greedy") and not args.self_play:
+                            args.self_play = "baseline_buffer"  # Switch to self-play
+                            self_play = get_self_play_class(args.self_play)(player_id=2)
                             print(f"Lesson completed in {curriculum_step} steps, switching to self-play with self-play type '{args.self_play}'.")
                             curriculum_step = 0
                             lesson_episode_count = 0
@@ -513,7 +412,7 @@ if __name__ == "__main__":
                             envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
                             envs.reset()
 
-                        if (recent_win_rate >= 0.75 and lesson_episode_count >= 50 and args.self_play == "naive"):
+                        if (recent_win_rate >= 0.7 and lesson_episode_count >= 50 and args.self_play):
                             print(f"Lesson completed in {curriculum_step} steps, updating opponent policy in self-play.")
                             curriculum_step = 0
                             lesson_episode_count = 0

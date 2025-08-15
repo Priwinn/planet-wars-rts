@@ -13,7 +13,7 @@ from gym_utils.KotlinForwardModelBridge import KotlinForwardModelBridge
 from gym_utils.PythonForwardModelBridge import PythonForwardModelBridge
 from util.gnn_utils import preprocess_graph_data, owner_one_hot_encoding
 from torch_geometric.data import Data
-from core.game_state import Player, Action
+from core.game_state import GameParams, Player, Action
 
 
 def tensor_to_action(tensor: torch.Tensor, player_id: Player) -> Action:
@@ -135,12 +135,12 @@ class PlanetWarsForwardModelEnv(gym.Env):
         self.game_params['transporterSpeed'] = np.random.uniform(2.0, 5.0)
         self.bridge.create_new_game(self.game_params)
         initial_state = self.bridge.get_game_state()
-
-        
         obs = self._get_observation()
-
         if self.self_play:
             self.opponent_policy = self.self_play.get_opponent()
+        if isinstance(self.opponent_policy, PlanetWarsPlayer):    
+            self.opponent_policy.prepare_to_play_as(params=self.game_params, player=self.opponent_player)
+
         return obs, {
             'tick': initial_state['tick'],
             'leader': initial_state['leader'],
@@ -157,14 +157,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
         
         # Get opponent action
         
-        if self.self_play:
-            device = next(self.opponent_policy.parameters()).device  # Same device as opponent, assume it is a PyTorch model
-            obs = self._get_observation().to(device=device)
-            obs, source_mask = preprocess_graph_data([obs], self.opponent_int, use_tick=self.args.use_tick, return_mask=True)
-            opponent_action = self.opponent_policy.get_action(obs, source_mask)
-            opponent_action = self._convert_gym_action_to_game_action(opponent_action)
-            
-        elif isinstance(self.opponent_policy, PlanetWarsPlayer):
+        if isinstance(self.opponent_policy, PlanetWarsPlayer):
             opponent_action = self.opponent_policy.get_action(self.bridge.game_state)
         elif callable(self.opponent_policy):
             opponent_action = self.opponent_policy(self.current_game_state)
@@ -479,6 +472,8 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
         # If num_planets is None, generate a random number of planets
         if self.args.num_planets is None:
             self.game_params['numPlanets'] = np.random.randint(self.args.num_planets_min, self.args.num_planets_max + 1)
+        self.game_params['initialNeutralRatio'] = np.random.uniform(0.25, 0.35)
+        self.game_params['transporterSpeed'] = np.random.uniform(2.0, 5.0)
 
         self.bridge.create_new_game(self.game_params)
         self.current_game_state = self.bridge.get_game_state()
@@ -491,12 +486,13 @@ class PlanetWarsForwardModelGNNEnv(PlanetWarsForwardModelEnv):
             self.edge_attr = torch.Tensor(np.stack(
                 [self._get_default_edge_features(edge[0], edge[1]) for edge in self.edge_index.permute(1, 0).numpy()]
             ))
-        
-
 
         obs = self._get_observation()
         if self.self_play:
             self.opponent_policy = self.self_play.get_opponent()
+        if isinstance(self.opponent_policy, PlanetWarsPlayer):    
+            params = GameParams(**self.game_params)
+            self.opponent_policy.prepare_to_play_as(params=params, player=self.opponent_player)
         return obs, {
             'tick': self.current_game_state['tick'],
             'leader': self.current_game_state['leader'],
