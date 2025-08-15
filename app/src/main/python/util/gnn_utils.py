@@ -21,7 +21,7 @@ def preprocess_graph_data(graph_data: list[PyGData],
     transporter_owners_per_edge = input.edge_attr[:, 0]
     transporter_owners = input.x[:, 3]
     if return_mask:
-        source_mask = to_dense_batch(torch.logical_and(planet_owners == 1, transporter_owners == 0), input.batch, fill_value=False)[0]
+        source_mask = to_dense_batch(torch.logical_and(planet_owners == player_id, transporter_owners == 0), input.batch, fill_value=False)[0]
         source_mask = torch.cat((torch.ones(input.batch_size, 1, dtype=torch.bool, device=source_mask.device), source_mask), dim=1)
     if use_tick:
         input.x = torch.cat((owner_one_hot_encoding(planet_owners, player_id),

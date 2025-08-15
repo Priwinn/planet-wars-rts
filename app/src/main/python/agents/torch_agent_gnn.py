@@ -24,6 +24,9 @@ class TorchAgentGNN(PlanetWarsPlayer):
         self.weights_path = weights_path
         state_dict = torch.load(weights_path, map_location=torch.device('cpu'), weights_only=False)
         self.model = model_class(state_dict['args'])
+        is_compiled_weights = any('_orig_mod.' in key for key in state_dict['model_state_dict'].keys())
+        if is_compiled_weights:
+            self.model = torch.compile(self.model, dynamic=True)
         self.model.load_state_dict(state_dict['model_state_dict']) if model_class and weights_path else None
 
         self.initial_game_state = None
@@ -137,7 +140,9 @@ class TorchAgentGNN(PlanetWarsPlayer):
     def prepare_to_play_as(self, player: Player, params: GameParams, opponent: str | None = ...) -> str:
         self.model.player_id = 1 if player == Player.Player1 else 2
         self.player_id = self.model.player_id
+        params.num_planets = params.num_planets - params.num_planets % 2  # Ensure even number of planets
         self.edge_index = torch.Tensor([[i, j] for i in range(params.num_planets) for j in range(params.num_planets) if i != j]).long().permute(1, 0)
+        self.initial_game_state = None
         return super().prepare_to_play_as(player, params, opponent)
         
     

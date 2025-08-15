@@ -160,7 +160,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
         if self.self_play:
             device = next(self.opponent_policy.parameters()).device  # Same device as opponent, assume it is a PyTorch model
             obs = self._get_observation().to(device=device)
-            obs, source_mask = preprocess_graph_data([obs], self.player_int, use_tick=self.args.use_tick, return_mask=True)
+            obs, source_mask = preprocess_graph_data([obs], self.opponent_int, use_tick=self.args.use_tick, return_mask=True)
             opponent_action = self.opponent_policy.get_action(obs, source_mask)
             opponent_action = self._convert_gym_action_to_game_action(opponent_action)
             
