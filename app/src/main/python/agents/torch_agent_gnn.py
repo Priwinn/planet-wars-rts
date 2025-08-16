@@ -22,11 +22,12 @@ class TorchAgentGNN(PlanetWarsPlayer):
         super().__init__()
         self.model_class = model_class
         self.weights_path = weights_path
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         if model is not None:
             self.model = model
         else:
-            state_dict = torch.load(weights_path, map_location=torch.device('cpu'), weights_only=False)
-            self.model = model_class(state_dict['args'])
+            state_dict = torch.load(weights_path, map_location=self.device, weights_only=False)
+            self.model = model_class(state_dict['args']).to(self.device)
             is_compiled_weights = any('_orig_mod.' in key for key in state_dict['model_state_dict'].keys())
             if is_compiled_weights:
                 self.model = torch.compile(self.model, dynamic=True)
@@ -42,7 +43,7 @@ class TorchAgentGNN(PlanetWarsPlayer):
         x, source_mask = preprocess_graph_data([x], self.player_id, use_tick=self.model.args.use_tick, return_mask=True)
 
 
-        action = self.model.get_action(x, source_mask=source_mask)
+        action = self.model.get_action(x.to(self.device), source_mask=source_mask.to(self.device))
         if action[0] == 0:
             # No-op action, return None
             return Action.do_nothing()

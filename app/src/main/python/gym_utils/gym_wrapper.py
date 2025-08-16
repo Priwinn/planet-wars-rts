@@ -182,7 +182,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
 
         # Penalize for no-op actions if there is a planet to send ships from
         if controlled_action.source_planet_id == -1 and valid_actions_bool:
-            reward -= 0.1
+            reward -= 0.01
 
         # Additional info
         info = {

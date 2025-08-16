@@ -234,7 +234,9 @@ if __name__ == "__main__":
 
     if args.self_play:
         self_play = get_self_play_class(args.self_play)(player_id=2)
-        self_play.add_opponent(TorchAgentGNN(model=agent.copy_as_opponent().to('cpu')))
+        for opponent in args.buffer_opponents:
+            self_play.add_opponent(TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path=opponent))
+        self_play.add_opponent(TorchAgentGNN(model=agent.copy_as_opponent().to(device))) 
         args.use_async = False # Override async setting for self-play
     else:
         self_play = None
@@ -407,7 +409,7 @@ if __name__ == "__main__":
                             
 
                             envs.close()
-                            self_play.add_opponent(agent.copy_as_opponent().to('cpu'))
+                            self_play.add_opponent(TorchAgentGNN(model=agent.copy_as_opponent().to(device)))
                             args.use_async=False
                             envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
                             envs.reset()
@@ -417,7 +419,7 @@ if __name__ == "__main__":
                             curriculum_step = 0
                             lesson_episode_count = 0
                             lesson_number += 1
-                            self_play.add_opponent(agent.copy_as_opponent().to('cpu'))
+                            self_play.add_opponent(TorchAgentGNN(model=agent.copy_as_opponent().to(device)))
                             envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
                             envs.reset()
 
