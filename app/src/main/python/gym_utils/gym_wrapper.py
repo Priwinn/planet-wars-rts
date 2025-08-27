@@ -11,7 +11,7 @@ from agents.planet_wars_agent import PlanetWarsPlayer
 from gym_utils.self_play import SelfPlayBase
 from gym_utils.KotlinForwardModelBridge import KotlinForwardModelBridge
 from gym_utils.PythonForwardModelBridge import PythonForwardModelBridge
-from util.gnn_utils import preprocess_graph_data, owner_one_hot_encoding
+from gym_utils.gnn_utils import preprocess_graph_data, owner_one_hot_encoding
 from torch_geometric.data import Data
 from core.game_state import GameParams, Player, Action
 

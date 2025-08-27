@@ -7,11 +7,11 @@ from typing import Dict, Any, Callable
 from agents.random_agents import CarefulRandomAgent
 from agents.greedy_heuristic_agent import GreedyHeuristicAgent
 from agents.planet_wars_agent import PlanetWarsPlayer
-from agents.torch_agent import TorchAgent
-from agents.mlp import PlanetWarsAgentMLP
+# from agents.torch_agent import TorchAgent
+# from agents.mlp import PlanetWarsAgentMLP
 from agents.torch_agent_gnn import TorchAgentGNN
 from agents.gnn import PlanetWarsAgentGNN
-from agents.ppo import Args
+from config.ppo_config import Args 
 from client_server.util import RemoteInvocationRequest, RemoteInvocationResponse, deserialize_args, serialize_result
 from core.game_state import Player, camel_to_snake
 

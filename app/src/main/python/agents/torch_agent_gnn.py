@@ -8,13 +8,12 @@ from torch_geometric.data import Data
 from torch_geometric.utils import add_self_loops
 
 from agents.planet_wars_agent import DEFAULT_OPPONENT, PlanetWarsPlayer
-from agents.mlp import PlanetWarsAgentMLP
 from agents.gnn import PlanetWarsAgentGNN
 from core.game_state import GameState, Action, Player, GameParams, Planet, Transporter
 from core.game_state_factory import GameStateFactory
 import time
 
-from util.gnn_utils import preprocess_graph_data
+from gym_utils.gnn_utils import preprocess_graph_data
 
 
 class TorchAgentGNN(PlanetWarsPlayer):
