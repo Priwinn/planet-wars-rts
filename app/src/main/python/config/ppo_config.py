@@ -23,9 +23,9 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "PlanetWarsForwardModel"
     """the id of the environment. Filled in runtime, either `PlanetWarsForwardModel` or `PlanetWarsForwardModelGNN` according to agent type"""
-    total_timesteps: int = 10000000
+    total_timesteps: int = 100000000
     """total timesteps of the experiments"""
-    learning_rate: float = 1e-5
+    learning_rate: float = 2e-4
     """the learning rate of the optimizer"""
     num_envs: int = 24
     """the number of parallel game environments"""
@@ -33,7 +33,7 @@ class Args:
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
-    anneal_ent_coef: bool = False
+    anneal_ent_coef: bool = True
     """Toggle entropy coefficient annealing"""
     gamma: float = 0.995
     """the discount factor gamma"""
@@ -49,7 +49,7 @@ class Args:
     """the surrogate clipping coefficient"""
     clip_vloss: bool = True
     """Toggles whether or not to use a clipped loss for the value function, as per the paper."""
-    ent_coef: float = 0.0005
+    ent_coef: float = 0.01
     """coefficient of the entropy"""
     vf_coef: float = 1.3
     """coefficient of the value function"""
@@ -74,7 +74,7 @@ class Args:
     """whether to include adjacency matrix in observations"""
     flatten_observation: bool = True
     """Filled on run time, mlp uses flattened observation, gnn uses graph observation"""
-    discretized_ratio_bins: int = 0
+    discretized_ratio_bins: int = 5
     """number of bins for the discretized ratio actor. Set to 0 to disable discretization"""
     new_map_each_run: bool = True
     """whether to create a new map for each run or use the same map"""
@@ -86,19 +86,18 @@ class Args:
     """if toggled, AsyncVectorEnv will be used"""
     use_tick: bool = False
     """if toggled, the game tick will be passed as an observation"""
-    model_weights: str = "models/PlanetWarsForwardModelGNN__ppo_config__random__1755299838_final.pt"
+    model_weights: str = None #"models/PlanetWarsForwardModelGNN__ppo_config__random__1755743356_galactic.pt" #"models/PlanetWarsForwardModelGNN__ppo_config__random__1755299838_final.pt"
     """If specified, the initial model weights will be loaded from this path"""
-    resume_iteration: int = None
+    resume_iteration: int = 0
     """The iteration to resume training from, for annealing purposes"""
+
 
     # Opponent configuration
     opponent_type: str = "random"  # "random", "greedy", "focus", "defensive"
     """type of opponent to train against"""
-    self_play: str = "baseline_buffer"  # "naive", "buffer", "baseline_buffer"
+    self_play: str = None #"naive", "buffer", "baseline_buffer"
     """self-play strategy to use, if applicable"""
-    buffer_opponents: list = field(default_factory=lambda: ["models/PlanetWarsForwardModelGNN__ppo_config__random__1755299838_iter_600.pt",
-                              "models/PlanetWarsForwardModelGNN__ppo_config__random__1755299838_iter_700.pt",
-                              "models/PlanetWarsForwardModelGNN__ppo_config__random__1755299838_iter_800.pt"])
+    buffer_opponents: list = field(default_factory=lambda: [])
     """list of opponents to use for buffer"""
 
     # to be filled in runtime

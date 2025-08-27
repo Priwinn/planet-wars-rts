@@ -182,7 +182,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
 
         # Penalize for no-op actions if there is a planet to send ships from
         if controlled_action.source_planet_id == -1 and valid_actions_bool:
-            reward -= 0.01
+            reward -= 0.1
 
         # Additional info
         info = {
@@ -359,7 +359,6 @@ class PlanetWarsForwardModelEnv(gym.Env):
     def _calculate_growth_rate(self, game_state: Dict[str, Any]) -> float:
         """Calculate growth rate based on game state for the controlled player"""
         planets = game_state['planets']
-        
         controlled_growth = 0
         
         # Growth rate based on owned planets
@@ -367,7 +366,14 @@ class PlanetWarsForwardModelEnv(gym.Env):
             if planet['owner'] == self.player_int:
                 controlled_growth += planet['growthRate']
         return controlled_growth
-    
+
+    def _calculate_change_in_growth_rate(self, game_state: Dict[str, Any]) -> float:
+        """Calculate change in growth rate based on game state for the controlled player"""
+        current_score = self._calculate_growth_rate(game_state)
+        previous_score = self.previous_score if self.previous_score is not None else 0
+        self.previous_score = current_score
+        return (current_score - previous_score)
+
     def _calculate_ship_delta(self, game_state: Dict[str, Any]) -> float:
         """Calculate delta based on ship ownership changes"""
         planets = game_state['planets']
@@ -412,6 +418,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
         # reward = self._calculate_growth_rate(game_state)/ self.game_params['maxTicks']*10
         # reward = self._calculate_growth_delta(game_state)*0.1
         # reward = self._calculate_ship_delta(game_state)*0.1
+        # reward = self._calculate_change_in_ship_delta(game_state)/10
         reward = self._calculate_change_in_score_delta(game_state)/20
         
         # If game is terminal, give a final reward based on outcome

@@ -27,6 +27,7 @@ from core.game_state import Player, GameParams
 from agents.mlp import PlanetWarsAgentMLP
 from agents.gnn import PlanetWarsAgentGNN, GraphInstanceToPyG
 from agents.baseline_policies import GreedyPolicy,RandomPolicy, FocusPolicy, DefensivePolicy
+from agents.GalacticArmada import GalacticArmada
 from agents.random_agents import CarefulRandomAgent, PureRandomAgent
 from agents.greedy_heuristic_agent import GreedyHeuristicAgent
 from agents.better_greedy_heuristic_agent import BetterGreedyHeuristicAgent
@@ -92,6 +93,10 @@ def make_env(env_id, idx, capture_video, run_name, device, args, self_play=None)
             env.set_opponent_policy(opponent)
         elif args.opponent_type == "better_greedy":
             opponent = BetterGreedyHeuristicAgent()
+            opponent.prepare_to_play_as(params=GameParams(**env.game_params), player=Player.Player2)
+            env.set_opponent_policy(opponent)
+        elif args.opponent_type == "galactic":
+            opponent = GalacticArmada()
             opponent.prepare_to_play_as(params=GameParams(**env.game_params), player=Player.Player2)
             env.set_opponent_policy(opponent)
 
@@ -230,6 +235,7 @@ if __name__ == "__main__":
     if args.model_weights is not None:
         state_dict = torch.load(args.model_weights, map_location=torch.device('cpu'), weights_only=False)
         agent.load_state_dict(state_dict['model_state_dict'])
+    if args.resume_iteration:
         optimizer.load_state_dict(state_dict['optimizer_state_dict'])
 
     if args.self_play:
@@ -293,8 +299,6 @@ if __name__ == "__main__":
     if args.anneal_lr:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.num_iterations)
         if args.resume_iteration:
-            for _ in range(args.resume_iteration):
-                scheduler.step()
             start_iteration = args.resume_iteration + 1
 
     for iteration in range(start_iteration, args.num_iterations + 1):
@@ -387,8 +391,15 @@ if __name__ == "__main__":
                             lesson_number += 1
                             envs.close()
                             envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
-
-                        if (recent_win_rate >= 0.8 and lesson_episode_count >= 50 and args.opponent_type == "better_greedy") and not args.self_play:
+                        if recent_win_rate >= 0.8 and lesson_episode_count >= 50 and args.opponent_type == "better_greedy" and not args.self_play:
+                            args.opponent_type = "galactic"  # Switch to galactic opponent
+                            print(f"Lesson completed in {curriculum_step} steps, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
+                            curriculum_step = 0
+                            lesson_episode_count = 0
+                            lesson_number += 1
+                            envs.close()
+                            envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
+                        if (recent_win_rate >= 0.8 and lesson_episode_count >= 50 and args.opponent_type == "galactic") and not args.self_play:
                             args.self_play = "baseline_buffer"  # Switch to self-play
                             self_play = get_self_play_class(args.self_play)(player_id=2)
                             print(f"Lesson completed in {curriculum_step} steps, switching to self-play with self-play type '{args.self_play}'.")
@@ -403,9 +414,9 @@ if __name__ == "__main__":
                                 'model_state_dict': agent.state_dict(),
                                 'optimizer_state_dict': optimizer.state_dict(),
                                 'args': args,
-                            }, f"models/{args.run_name}_better_greedy.pt")
+                            }, f"models/{args.run_name}_galactic.pt")
                             if args.track:
-                                wandb.save(f"models/{args.run_name}_better_greedy.pt")
+                                wandb.save(f"models/{args.run_name}_galactic.pt")
                             
 
                             envs.close()

@@ -81,6 +81,6 @@ class GameServerAgent:
 
 if __name__ == "__main__":
 
-    agent= TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo__random__1754542421_iter_700.pt")  
+    agent= TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__random__1755893274_final.pt")  
     asyncio.run(GameServerAgent(host="0.0.0.0", port=8080, agent=agent).start())
     #Use 0.0.0.0 for container access

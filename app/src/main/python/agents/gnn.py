@@ -408,7 +408,7 @@ class PlanetWarsAgentGNN(nn.Module):
 
             # Initialize target and ratio actions
             target_action = torch.zeros(1, dtype=torch.long, device=source_action.device)
-            ratio_action = torch.zeros(1, 1, dtype=torch.float, device=source_action.device)
+            ratio_action = torch.zeros(1, dtype=torch.float, device=source_action.device)
             
             # Only sample target and ratio actions if source action is non-null (not no-op)
             valid_action_idx = source_action != 0
@@ -442,18 +442,18 @@ class PlanetWarsAgentGNN(nn.Module):
                     if self.exploit:
                         ratio_action = ratio_mean
                     else:
-                        ratio_action = SigmoidTransformedDistribution(ratio_mean, self.ratio_actor_logstd.exp()).sample()
+                        ratio_action = SigmoidTransformedDistribution(ratio_mean, self.ratio_actor_logstd.exp()).sample().squeeze(-1)
                 else:
                     if self.exploit:
                         ratio_action = torch.argmax(self.ratio_actor(ratio_input), dim=-1)
                     else:
                         ratio_action = Categorical(logits=self.ratio_actor(ratio_input)).sample()
                     ratio_action = ratio_action.float() / (self.args.discretized_ratio_bins-1)
-
+            
             action = torch.cat([
                 source_action.float(),
                 target_action.float(),
-                ratio_action.squeeze(-1)
+                ratio_action
             ], dim=-1)
 
             return action

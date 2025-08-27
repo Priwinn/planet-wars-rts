@@ -2,6 +2,7 @@ import random
 from agents.random_agents import PureRandomAgent, CarefulRandomAgent
 from agents.better_greedy_heuristic_agent import BetterGreedyHeuristicAgent
 from agents.baseline_policies import GreedyPolicy
+from agents.GalacticArmada import GalacticArmada
 import copy
 
 #Register self-play classes
@@ -57,7 +58,7 @@ class BufferSelfPlay(SelfPlayBase):
             self.opponents.pop(0)
 
 class BaselineBufferSelfPlay(BufferSelfPlay):
-    def __init__(self, player_id, pool_size=5, baseline_opponents=[BetterGreedyHeuristicAgent(), CarefulRandomAgent()], baseline_ratio=0.33):
+    def __init__(self, player_id, pool_size=5, baseline_opponents=[BetterGreedyHeuristicAgent(), GalacticArmada()], baseline_ratio=0.33):
         super().__init__(player_id, pool_size)
         self.baseline_opponents = baseline_opponents if baseline_opponents is not None else []
         self.baseline_ratio = baseline_ratio

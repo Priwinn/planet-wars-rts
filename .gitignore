@@ -95,3 +95,4 @@ wandb/
 !models/PlanetWarsForwardModelGNN__ppo__random__adj_False__1__1751827843_final.pt
 !models/PlanetWarsForwardModelGNN__ppo__random__1754542421_iter_700.pt
 !models/PlanetWarsForwardModelGNN__ppo__random__1754768336_final.pt
+!models/PlanetWarsForwardModelGNN__ppo_config__random__1755893274_final.pt
