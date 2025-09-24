@@ -230,7 +230,11 @@ if __name__ == "__main__":
         agent = torch.compile(agent, dynamic=True)
     else:
         agent = PlanetWarsAgentMLP(args).to(device)
-    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
+    if args.optimizer == "muon":
+        from heavyball import ForeachMuon
+        optimizer = ForeachMuon(agent.parameters(), lr=args.learning_rate, eps=1e-5, betas=(0.9, 0.99))
+    else:
+        optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5, fused=True)
 
     if args.model_weights is not None:
         state_dict = torch.load(args.model_weights, map_location=torch.device('cpu'), weights_only=False)
@@ -554,17 +558,24 @@ if __name__ == "__main__":
         ratio_mean = (b_actions[is_op, 2].mean() if b_actions.shape[1] > 2 else 0.0)
         ratio_std = (b_actions[is_op, 2].std() if b_actions.shape[1] > 2 else 0.0)
         source_counts = torch.bincount(b_actions[:, 0].long(), minlength=args.num_planets_max+1)
-        target_counts = torch.bincount(b_actions[is_op, 1].long(), minlength=args.num_planets_max+1)
-        source_freq = source_counts.float() / (args.batch_size-source_counts[0].float())  # Exclude no-op action
-        target_freq = target_counts.float() / args.batch_size
+        _obs= [o for i,o in zip(is_op, b_obs) if i]
+        target_owners = torch.Tensor([o.x[b_action[1].long().item()][0] for (o, b_action) in zip(_obs, b_actions[is_op])])
+        target_own_freq = (target_owners == 1).sum().item() / len(target_owners) if len(target_owners) > 0 else 0.0
+        target_neutral_freq = (target_owners == 0).sum().item() / len(target_owners) if len(target_owners) > 0 else 0.0
+        target_enemy_freq = (target_owners == 2).sum().item() / len(target_owners) if len(target_owners) > 0 else 0.0
+        # target_counts = torch.bincount(b_actions[is_op, 1].long(), minlength=args.num_planets_max+1)
+        # source_freq = source_counts.float() / (args.batch_size-source_counts[0].float())  # Exclude no-op action
+        # target_freq = target_counts.float() / args.batch_size
 
         writer.add_scalar("action_stats/mean_action_ratio", ratio_mean, global_step)
         writer.add_scalar("action_stats/std_action_ratio", ratio_std, global_step)
         writer.add_scalar("action_stats/source_noop_freq", source_counts[0].float()/args.batch_size, global_step)
-        #This probably doesn't make sense if num_planets is not fixed
-        for i in range(args.num_planets_max):
-            writer.add_scalar(f"action_stats/source_planet_{i}_freq", source_freq[i+1].item(), global_step)
-            writer.add_scalar(f"action_stats/target_planet_{i}_freq", target_freq[i].item(), global_step)
+        writer.add_scalar("action_stats/target_own_freq", target_own_freq, global_step)
+        writer.add_scalar("action_stats/target_neutral_freq", target_neutral_freq, global_step)
+        writer.add_scalar("action_stats/target_enemy_freq", target_enemy_freq, global_step)
+        # for i in range(args.num_planets_max):
+        #     writer.add_scalar(f"action_stats/source_planet_{i}_freq", source_freq[i+1].item(), global_step)
+        #     writer.add_scalar(f"action_stats/target_planet_{i}_freq", target_freq[i].item(), global_step)
 
         # Print progress
         if iteration % 10 == 0:

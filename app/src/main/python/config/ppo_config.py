@@ -27,6 +27,8 @@ class Args:
     """total timesteps of the experiments"""
     learning_rate: float = 2e-4
     """the learning rate of the optimizer"""
+    optimizer: str = "adam"
+    """the optimizer to use: 'adam' or 'muon'"""
     num_envs: int = 24
     """the number of parallel game environments"""
     num_steps: int = 1024
@@ -74,7 +76,7 @@ class Args:
     """whether to include adjacency matrix in observations"""
     flatten_observation: bool = True
     """Filled on run time, mlp uses flattened observation, gnn uses graph observation"""
-    discretized_ratio_bins: int = 5
+    discretized_ratio_bins: int = 3
     """number of bins for the discretized ratio actor. Set to 0 to disable discretization"""
     new_map_each_run: bool = True
     """whether to create a new map for each run or use the same map"""
@@ -90,6 +92,12 @@ class Args:
     """If specified, the initial model weights will be loaded from this path"""
     resume_iteration: int = 0
     """The iteration to resume training from, for annealing purposes"""
+    hierarchical_action: bool = True
+    """if toggled, hierarchical action space will be used (only for gnn agent)"""  
+    shared_gnn: bool = False
+    """if toggled, the same gnn will be used for actor and value features (only for gnn agent)"""
+    target_mask: str = "all"  # "all", "enemy", "not_self", "not_neutral"
+    """the target mask to use for the actions"""   
 
 
     # Opponent configuration

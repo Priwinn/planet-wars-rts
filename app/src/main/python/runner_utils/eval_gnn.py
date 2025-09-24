@@ -47,8 +47,9 @@ def _evaluate_agent_in_league(test_agent, port):
 
 if __name__ == "__main__":
     import os
-    test_agent = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__random__1755944875_final.pt") 
+    d3 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__random__1755893274_final.pt") 
+    d5 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__random__1755984410_final.pt")
     # test_agent = BetterGreedyHeuristicAgent()  # replace with your actual agent
     # _fast_agent_eval(test_agent, n_games=30, game_params=GameParams(num_planets=20), baseline_agents=[CarefulRandomAgent(), BetterGreedyHeuristicAgent()])
-    _fast_agent_eval_random(test_agent, n_maps=5, games_per_map=10, baseline_agents=[GalacticArmada()])
+    _fast_agent_eval_random(d5, n_maps=5, games_per_map=10, baseline_agents=[GalacticArmada(),d3])
     # _evaluate_agent_in_league(test_agent, port=8080)

@@ -181,7 +181,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
         truncated = self.current_game_state['tick'] >= self.max_ticks and not self.current_game_state['isTerminal']
 
         # Penalize for no-op actions if there is a planet to send ships from
-        if controlled_action.source_planet_id == -1 and valid_actions_bool:
+        if controlled_action.num_ships == 0 and valid_actions_bool:
             reward -= 0.1
 
         # Additional info
