@@ -181,8 +181,9 @@ class PlanetWarsForwardModelEnv(gym.Env):
         truncated = self.current_game_state['tick'] >= self.max_ticks and not self.current_game_state['isTerminal']
 
         # Penalize for no-op actions if there is a planet to send ships from
-        if controlled_action.num_ships == 0 and valid_actions_bool:
-            reward -= 0.1
+        penalize_noop = controlled_action.num_ships == 0 and valid_actions_bool
+        if penalize_noop:
+            reward -= self.args.noop_penalty
 
         # Additional info
         info = {
@@ -192,7 +193,8 @@ class PlanetWarsForwardModelEnv(gym.Env):
             'player1Ships': self.current_game_state['player1Ships'],
             'player2Ships': self.current_game_state['player2Ships'],
             'controlled_player': self.player_int,
-            'opponent_player': self.opponent_int
+            'opponent_player': self.opponent_int,
+            'penalized_noop': penalize_noop
         }
         if done: 
             print(f"Game over at tick {self.current_game_state['tick']}, leader: {self.current_game_state['leader']}")
@@ -314,7 +316,11 @@ class PlanetWarsForwardModelEnv(gym.Env):
             owner = planet['owner']
             
             # Base score: ship (+ growth rate)
-            planet_value = planet['numShips'] + planet['growthRate'] * 100 #np.sqrt(self.game_params['maxTicks']- game_state['tick'])
+            if self.args.use_tick:
+                ticks_left = self.game_params['maxTicks'] - game_state['tick']
+                planet_value = planet['numShips'] + planet['growthRate'] * (1-self.args.gamma**ticks_left)/(1-self.args.gamma)
+            else:
+                planet_value = planet['numShips'] + planet['growthRate'] * 100 #np.sqrt(self.game_params['maxTicks']- game_state['tick'])
 
             if owner == self.player_int:
                 controlled_player_score += planet_value

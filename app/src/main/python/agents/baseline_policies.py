@@ -165,7 +165,7 @@ class FocusPolicy(gym_policy):
 
             # Calculate the number of ships to send
             owned_ships = sum(p['numShips'] for p in owned_planets)
-            num_ships = min(estimated_defense * 1.5 * source['numShips'] / owned_ships, source['numShips'] * 0.8) 
+            num_ships = min(estimated_defense * 1.5 * source['numShips'] / owned_ships, source['numShips'] * 0.5) 
 
 
             return Action(

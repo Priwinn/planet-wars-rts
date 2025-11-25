@@ -14,7 +14,7 @@ class BetterGreedyHeuristicAgent(PlanetWarsPlayer):
         if not my_planets:
             return Action.do_nothing()
 
-        # Consider planets not owned by the player
+        # Consider only opponent-owned planets
         candidate_targets = [p for p in game_state.planets if p.owner == self.player.opponent()]
         if not candidate_targets:
             return Action.do_nothing()

@@ -3,6 +3,9 @@ from runner_utils.evaluate_python_agent_in_league import evaluate_python_agent
 from core.game_state import GameParams
 from agents.greedy_heuristic_agent import GreedyHeuristicAgent
 from agents.better_greedy_heuristic_agent import BetterGreedyHeuristicAgent
+from agents.careful_greedy_heuristic_agent import CarefulGreedyHeuristicAgent
+from agents.aggressive_greedy_heuristic_agent import AggressiveGreedyHeuristicAgent
+
 from agents.GalacticArmada import GalacticArmada
 from agents.torch_agent_gnn import TorchAgentGNN
 from agents.gnn import PlanetWarsAgentGNN
@@ -47,9 +50,13 @@ def _evaluate_agent_in_league(test_agent, port):
 
 if __name__ == "__main__":
     import os
-    d3 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__random__1755893274_final.pt") 
-    d5 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__random__1755984410_final.pt")
+    d3 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__random__1762970467_final.pt") 
+    d3noop = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__random__1763172764_final.pt")
+    g=GalacticArmada()
+    agh=AggressiveGreedyHeuristicAgent()
+    bgh=BetterGreedyHeuristicAgent()
+    cgh=CarefulGreedyHeuristicAgent()
     # test_agent = BetterGreedyHeuristicAgent()  # replace with your actual agent
     # _fast_agent_eval(test_agent, n_games=30, game_params=GameParams(num_planets=20), baseline_agents=[CarefulRandomAgent(), BetterGreedyHeuristicAgent()])
-    _fast_agent_eval_random(d5, n_maps=5, games_per_map=10, baseline_agents=[GalacticArmada(),d3])
+    _fast_agent_eval_random(cgh, n_maps=10, games_per_map=10, baseline_agents=[g, bgh, agh])
     # _evaluate_agent_in_league(test_agent, port=8080)

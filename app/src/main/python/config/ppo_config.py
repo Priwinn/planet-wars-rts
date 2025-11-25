@@ -41,7 +41,7 @@ class Args:
     """the discount factor gamma"""
     gae_lambda: float = 0.95
     """the lambda for the general advantage estimation"""
-    num_minibatches: int = 96
+    num_minibatches: int = 64
     """the number of mini-batches"""
     update_epochs: int = 4
     """the K epochs to update the policy"""
@@ -76,8 +76,10 @@ class Args:
     """whether to include adjacency matrix in observations"""
     flatten_observation: bool = True
     """Filled on run time, mlp uses flattened observation, gnn uses graph observation"""
-    discretized_ratio_bins: int = 3
+    discretized_ratio_bins: int = 0
     """number of bins for the discretized ratio actor. Set to 0 to disable discretization"""
+    discretize_include_zero: bool = False
+    """whether to include zero in the discretized ratio bins"""
     new_map_each_run: bool = True
     """whether to create a new map for each run or use the same map"""
     hidden_dim: int = 256
@@ -98,11 +100,17 @@ class Args:
     """if toggled, the same gnn will be used for actor and value features (only for gnn agent)"""
     target_mask: str = "all"  # "all", "enemy", "not_self", "not_neutral"
     """the target mask to use for the actions"""   
+    use_global_features_ratio: bool = True
+    """if toggled, global features from the GNN will be concatenated to the local features in the ratio action head"""
+    noop_penalty: float = 0.05
+    """penalty for doing nothing action when there are possible actions"""
 
 
     # Opponent configuration
     opponent_type: str = "random"  # "random", "greedy", "focus", "defensive"
     """type of opponent to train against"""
+    opponent_baselines: list = field(default_factory=lambda: ['random','careful_random', 'greedy', 'better_greedy','aggressive_greedy', 'galactic'])
+    """list of baseline opponents to use for self-play"""
     self_play: str = None #"naive", "buffer", "baseline_buffer"
     """self-play strategy to use, if applicable"""
     buffer_opponents: list = field(default_factory=lambda: [])

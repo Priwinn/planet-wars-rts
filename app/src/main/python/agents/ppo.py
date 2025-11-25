@@ -31,6 +31,7 @@ from agents.GalacticArmada import GalacticArmada
 from agents.random_agents import CarefulRandomAgent, PureRandomAgent
 from agents.greedy_heuristic_agent import GreedyHeuristicAgent
 from agents.better_greedy_heuristic_agent import BetterGreedyHeuristicAgent
+from agents.aggressive_greedy_heuristic_agent import AggressiveGreedyHeuristicAgent
 from agents.torch_agent_gnn import TorchAgentGNN
 from gym_utils.self_play import get_self_play_class
 from gym_utils.gnn_utils import preprocess_graph_data, owner_one_hot_encoding
@@ -93,6 +94,10 @@ def make_env(env_id, idx, capture_video, run_name, device, args, self_play=None)
             env.set_opponent_policy(opponent)
         elif args.opponent_type == "better_greedy":
             opponent = BetterGreedyHeuristicAgent()
+            opponent.prepare_to_play_as(params=GameParams(**env.game_params), player=Player.Player2)
+            env.set_opponent_policy(opponent)
+        elif args.opponent_type == "aggressive_greedy":
+            opponent = AggressiveGreedyHeuristicAgent()
             opponent.prepare_to_play_as(params=GameParams(**env.game_params), player=Player.Player2)
             env.set_opponent_policy(opponent)
         elif args.opponent_type == "galactic":
@@ -306,19 +311,15 @@ if __name__ == "__main__":
             start_iteration = args.resume_iteration + 1
 
     for iteration in range(start_iteration, args.num_iterations + 1):
-        # Annealing the rate if instructed to do so
-        # if args.anneal_lr:
-            # frac = 1.0 - (iteration - 1.0) / args.num_iterations
-            # lrnow = frac * args.learning_rate
-            # optimizer.param_groups[0]["lr"] = lrnow
-            
-            
+
         if args.anneal_ent_coef:
             frac = 0.5+np.cos(np.pi * (iteration - 1) / args.num_iterations) / 2.0
             ent_coef = frac * ent_coef
-
+            
+        penalized_noops = 0
 
         for step in range(0, args.num_steps):
+            
             global_step += args.num_envs
             curriculum_step += args.num_envs
             if args.flatten_observation or step == 0:
@@ -348,6 +349,10 @@ if __name__ == "__main__":
                     obs[step+1] = [o for o in next_obs]  # Keep on cpu for dataloader
                 
             next_done = torch.Tensor(next_done).to(device)
+
+            # Track penalized no-ops
+            penalized_noops += sum(infos.get("penalized_noop", [0]*args.num_envs))
+
             # if args.profile_path is not None:
             #     profiler.step()  # Step the profiler if profiling is enabled
 
@@ -370,40 +375,17 @@ if __name__ == "__main__":
                         # Calculate recent win rate (last 50 episodes)
                         recent_win_rate = np.mean(win_rate[-50:]) if len(win_rate) >= 50 else np.mean(win_rate) if win_rate else 0.0
                         writer.add_scalar("charts/win_rate", recent_win_rate, global_step)
+                        writer.add_scalar("charts/lesson_number", lesson_number, global_step)
                          # Reset curriculum step if win rate is good and move to next curriculum step
-                        if recent_win_rate >= 0.8 and lesson_episode_count >= 50 and args.opponent_type == "random" and not args.self_play:
-                            args.opponent_type = "greedy"  # Switch to greedy opponent
+                        if recent_win_rate >= 0.8 and lesson_episode_count >= 50 and not args.self_play and lesson_number < args.opponent_baselines.__len__()-1:
+                            args.opponent_type = args.opponent_baselines[lesson_number + 1]  # Switch to next baseline opponent
                             print(f"Lesson completed in {curriculum_step} steps, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
                             curriculum_step = 0
                             lesson_episode_count = 0
                             lesson_number += 1
                             envs.close()
                             envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
-                        if recent_win_rate >= 0.8 and lesson_episode_count >= 50 and args.opponent_type == "greedy" and not args.self_play:
-                            args.opponent_type = "careful_random"  # Switch to careful random opponent
-                            print(f"Lesson completed in {curriculum_step} steps, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
-                            curriculum_step = 0
-                            lesson_episode_count = 0
-                            lesson_number += 1
-                            envs.close()
-                            envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
-                        if recent_win_rate >= 0.8 and lesson_episode_count >= 50 and args.opponent_type == "careful_random" and not args.self_play:
-                            args.opponent_type = "better_greedy"  # Switch to better greedy opponent
-                            print(f"Lesson completed in {curriculum_step} steps, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
-                            curriculum_step = 0
-                            lesson_episode_count = 0
-                            lesson_number += 1
-                            envs.close()
-                            envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
-                        if recent_win_rate >= 0.8 and lesson_episode_count >= 50 and args.opponent_type == "better_greedy" and not args.self_play:
-                            args.opponent_type = "galactic"  # Switch to galactic opponent
-                            print(f"Lesson completed in {curriculum_step} steps, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
-                            curriculum_step = 0
-                            lesson_episode_count = 0
-                            lesson_number += 1
-                            envs.close()
-                            envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
-                        if (recent_win_rate >= 0.8 and lesson_episode_count >= 50 and args.opponent_type == "galactic") and not args.self_play:
+                        if (recent_win_rate >= 0.8 and lesson_episode_count >= 50) and not args.self_play and lesson_number == args.opponent_baselines.__len__()-1:
                             args.self_play = "baseline_buffer"  # Switch to self-play
                             self_play = get_self_play_class(args.self_play)(player_id=2)
                             print(f"Lesson completed in {curriculum_step} steps, switching to self-play with self-play type '{args.self_play}'.")
@@ -563,6 +545,7 @@ if __name__ == "__main__":
         target_own_freq = (target_owners == 1).sum().item() / len(target_owners) if len(target_owners) > 0 else 0.0
         target_neutral_freq = (target_owners == 0).sum().item() / len(target_owners) if len(target_owners) > 0 else 0.0
         target_enemy_freq = (target_owners == 2).sum().item() / len(target_owners) if len(target_owners) > 0 else 0.0
+        penalized_noop_freq = penalized_noops / args.batch_size
         # target_counts = torch.bincount(b_actions[is_op, 1].long(), minlength=args.num_planets_max+1)
         # source_freq = source_counts.float() / (args.batch_size-source_counts[0].float())  # Exclude no-op action
         # target_freq = target_counts.float() / args.batch_size
@@ -573,22 +556,23 @@ if __name__ == "__main__":
         writer.add_scalar("action_stats/target_own_freq", target_own_freq, global_step)
         writer.add_scalar("action_stats/target_neutral_freq", target_neutral_freq, global_step)
         writer.add_scalar("action_stats/target_enemy_freq", target_enemy_freq, global_step)
+        writer.add_scalar("action_stats/penalized_noop_freq", penalized_noop_freq, global_step)
         # for i in range(args.num_planets_max):
         #     writer.add_scalar(f"action_stats/source_planet_{i}_freq", source_freq[i+1].item(), global_step)
         #     writer.add_scalar(f"action_stats/target_planet_{i}_freq", target_freq[i].item(), global_step)
 
         # Print progress
-        if iteration % 10 == 0:
-            wr = np.mean(win_rate[-50:]) if len(win_rate) >= 50 else np.mean(win_rate) if win_rate else 0.0
-            print(f"Iteration {iteration}/{args.num_iterations}")
-            print(f"  SPS: {steps_per_second}")
-            print(f"  Mean reward: {mean_reward:.3f}")
-            print(f"  Recent win rate: {wr:.3f}")
-            print(f"  Learning rate: {optimizer.param_groups[0]['lr']:.6f}")
+        # if iteration % 10 == 0:
+        #     wr = np.mean(win_rate[-50:]) if len(win_rate) >= 50 else np.mean(win_rate) if win_rate else 0.0
+        #     print(f"Iteration {iteration}/{args.num_iterations}")
+        #     print(f"  SPS: {steps_per_second}")
+        #     print(f"  Mean reward: {mean_reward:.3f}")
+        #     print(f"  Recent win rate: {wr:.3f}")
+        #     print(f"  Learning rate: {optimizer.param_groups[0]['lr']:.6f}")
         sys.stdout.flush()
 
         # Save model checkpoint
-        if iteration % 100 == 0:
+        if iteration % 250 == 0:
             torch.save({
                 'iteration': iteration,
                 'model_state_dict': agent.state_dict(),
