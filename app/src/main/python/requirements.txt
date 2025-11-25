@@ -1,0 +1,14 @@
+gymnasium==1.1.1
+heavyball==2.0.0
+JPype1==1.5.2
+networkx==3.3
+numpy==2.1.2
+py4j==0.10.9.9
+pydantic==2.11.5
+PyYAML==6.0.2
+requests==2.32.4
+torch==2.7.1+cu128
+torch_geometric==2.7.0
+tyro==0.9.35
+wandb==0.23.0
+websockets==15.0.1
