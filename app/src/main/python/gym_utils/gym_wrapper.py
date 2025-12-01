@@ -9,7 +9,7 @@ from agents.baseline_policies import RandomPolicy, GreedyPolicy
 from agents.planet_wars_agent import PlanetWarsPlayer
 
 from gym_utils.self_play import SelfPlayBase
-from gym_utils.KotlinForwardModelBridge import KotlinForwardModelBridge
+# from gym_utils.KotlinForwardModelBridge import KotlinForwardModelBridge
 from gym_utils.PythonForwardModelBridge import PythonForwardModelBridge
 from gym_utils.gnn_utils import preprocess_graph_data, owner_one_hot_encoding
 from torch_geometric.data import Data
@@ -194,7 +194,12 @@ class PlanetWarsForwardModelEnv(gym.Env):
             'player2Ships': self.current_game_state['player2Ships'],
             'controlled_player': self.player_int,
             'opponent_player': self.opponent_int,
-            'penalized_noop': penalize_noop
+            'penalized_noop': penalize_noop,
+            'controlled_conquers': self.bridge.get_player_conquers().get(self.controlled_player, {}).get('opponent', 0),
+            'opponent_conquers': self.bridge.get_player_conquers().get(self.opponent_player, {}).get('opponent', 0),
+            'neutral_conquers': self.bridge.get_player_conquers().get(self.controlled_player, {}).get('neutral', 0),
+            'num_planets': self.game_params['numPlanets'],
+            'neutral_planets': self.game_params['initialNeutralRatio'] * self.game_params['numPlanets']
         }
         if done: 
             print(f"Game over at tick {self.current_game_state['tick']}, leader: {self.current_game_state['leader']}")
@@ -400,7 +405,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
             elif transporter['owner'] == self.opponent_int:
                 opponent_delta += transporter['numShips']
 
-        return (controlled_delta - opponent_delta)/(self.game_params['maxTicks'])
+        return (controlled_delta - opponent_delta)
     
     def _calculate_growth_delta(self, game_state: Dict[str, Any]) -> float:
         """Calculate delta based on growth rate changes"""
@@ -424,8 +429,11 @@ class PlanetWarsForwardModelEnv(gym.Env):
         # reward = self._calculate_growth_rate(game_state)/ self.game_params['maxTicks']*10
         # reward = self._calculate_growth_delta(game_state)*0.1
         # reward = self._calculate_ship_delta(game_state)*0.1
-        # reward = self._calculate_change_in_ship_delta(game_state)/10
-        reward = self._calculate_change_in_score_delta(game_state)/20
+
+        if self.args.reward_type == "score_delta":
+            reward = self._calculate_change_in_score_delta(game_state)/20
+        elif self.args.reward_type == "ship_delta":
+            reward = self._calculate_change_in_ship_delta(game_state)/20
         
         # If game is terminal, give a final reward based on outcome
         if game_state['isTerminal'] or game_state['tick'] >= self.max_ticks:

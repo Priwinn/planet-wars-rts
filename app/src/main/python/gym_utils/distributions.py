@@ -47,7 +47,7 @@ class SigmoidTransformedDistribution(TransformedDistribution):
     def log_prob(self, value):
         """Compute log probability with clipping for numerical stability."""
         # Clip the value to avoid NaNs
-        value = torch.clamp(value, min=self._threshold, max=1.0 - self._threshold)
+        value = torch.clamp(value, min=1.0 - self._threshold, max=self._threshold)
         
         # We don't need to handle jacobian because we use ratios in PPO (see SEED RL paper)
         result = super().log_prob(value)
@@ -59,7 +59,7 @@ class SigmoidTransformedDistribution(TransformedDistribution):
         """Entropy estimation using a single sample."""
         # Sample from base distribution
         # print(f"Base distribution stddev: {self.base_dist.stddev}")
-        sample = self.base_dist.sample()
+        sample = self.base_dist.rsample()
         # Compute log det jacobian at the sample point
         sigmoid_sample = torch.sigmoid(sample)
 

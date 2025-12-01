@@ -35,13 +35,13 @@ class Args:
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
-    anneal_ent_coef: bool = True
+    anneal_ent_coef: bool = False
     """Toggle entropy coefficient annealing"""
-    gamma: float = 0.995
+    gamma: float = 0.999
     """the discount factor gamma"""
     gae_lambda: float = 0.95
     """the lambda for the general advantage estimation"""
-    num_minibatches: int = 64
+    num_minibatches: int = 48
     """the number of mini-batches"""
     update_epochs: int = 4
     """the K epochs to update the policy"""
@@ -90,9 +90,7 @@ class Args:
     """if toggled, AsyncVectorEnv will be used"""
     use_tick: bool = False
     """if toggled, the game tick will be passed as an observation"""
-    model_weights: str = None #"models/PlanetWarsForwardModelGNN__ppo_config__random__1755743356_galactic.pt" #"models/PlanetWarsForwardModelGNN__ppo_config__random__1755299838_final.pt"
-    """If specified, the initial model weights will be loaded from this path"""
-    resume_iteration: int = 0
+    model_weights: str = None
     """The iteration to resume training from, for annealing purposes"""
     hierarchical_action: bool = True
     """if toggled, hierarchical action space will be used (only for gnn agent)"""  
@@ -104,17 +102,23 @@ class Args:
     """if toggled, global features from the GNN will be concatenated to the local features in the ratio action head"""
     noop_penalty: float = 0.05
     """penalty for doing nothing action when there are possible actions"""
+    reward_type: str = "score_delta"  # "score_delta", "ship_delta"
+    """type of reward to use"""
 
 
     # Opponent configuration
-    opponent_type: str = "random"  # "random", "greedy", "focus", "defensive"
+    opponent_type: str = "passive" 
     """type of opponent to train against"""
-    opponent_baselines: list = field(default_factory=lambda: ['random','careful_random', 'greedy', 'better_greedy','aggressive_greedy', 'galactic'])
-    """list of baseline opponents to use for self-play"""
+    curriculum_opponents: list = field(default_factory=lambda: ['passive', 'random', 'careful_random', 'greedy', 'better_greedy', 'galactic'])
+    """list of (opponent_type, win_rate_threshold) tuples for curriculum learning"""
+    opponent_baselines: list = field(default_factory=lambda: ['better_greedy', 'galactic'])
+    """list of baseline opponents to use for self-play. Not implemented yet."""
     self_play: str = None #"naive", "buffer", "baseline_buffer"
     """self-play strategy to use, if applicable"""
     buffer_opponents: list = field(default_factory=lambda: [])
     """list of opponents to use for buffer"""
+    opponent_device: str = 'cpu'
+    """device to load opponent models onto"""
 
     # to be filled in runtime
     batch_size: int = 0

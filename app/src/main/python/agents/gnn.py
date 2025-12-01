@@ -60,9 +60,9 @@ class PlanetWarsAgentGNN(nn.Module):
             (layer_init_gat(GATv2Conv(self.node_feature_dim, self.hidden_dim//4, heads=4, concat=True, edge_dim=5, add_self_loops=False)), 'x, edge_index, edge_attr -> x'),
             (MeanSubtractionNorm(), 'x, batch -> x'),
             nn.ReLU(),
-            (layer_init_gat(GATv2Conv(self.hidden_dim, self.hidden_dim//4, heads=4, concat=True, edge_dim=5, add_self_loops=False)), 'x, edge_index, edge_attr -> x'),
-            (MeanSubtractionNorm(), 'x, batch -> x'),
-            nn.ReLU(),
+            # (layer_init_gat(GATv2Conv(self.hidden_dim, self.hidden_dim//4, heads=4, concat=True, edge_dim=5, add_self_loops=False)), 'x, edge_index, edge_attr -> x'),
+            # (MeanSubtractionNorm(), 'x, batch -> x'),
+            # nn.ReLU(),
             (layer_init_gat(GATv2Conv(self.hidden_dim, self.hidden_dim//4, heads=4, concat=True, edge_dim=5, add_self_loops=False)), 'x, edge_index, edge_attr -> x'),
             nn.ReLU(),
         ])
@@ -71,9 +71,9 @@ class PlanetWarsAgentGNN(nn.Module):
                 (layer_init_gat(GATv2Conv(self.node_feature_dim, self.hidden_dim//4, heads=4, concat=True, edge_dim=5, add_self_loops=False)), 'x, edge_index, edge_attr -> x'),
                 (MeanSubtractionNorm(), 'x, batch -> x'),
                 nn.ReLU(),
-                (layer_init_gat(GATv2Conv(self.hidden_dim, self.hidden_dim//4, heads=4, concat=True, edge_dim=5, add_self_loops=False)), 'x, edge_index, edge_attr -> x'),
-                (MeanSubtractionNorm(), 'x, batch -> x'),
-                nn.ReLU(),
+                # (layer_init_gat(GATv2Conv(self.hidden_dim, self.hidden_dim//4, heads=4, concat=True, edge_dim=5, add_self_loops=False)), 'x, edge_index, edge_attr -> x'),
+                # (MeanSubtractionNorm(), 'x, batch -> x'),
+                # nn.ReLU(),
                 (layer_init_gat(GATv2Conv(self.hidden_dim, self.hidden_dim//4, heads=4, concat=True, edge_dim=5, add_self_loops=False)), 'x, edge_index, edge_attr  -> x'),
                 nn.ReLU(),
             ])
@@ -129,17 +129,17 @@ class PlanetWarsAgentGNN(nn.Module):
         # Ship ratio (continuous) - uses global features
         if args.discretized_ratio_bins == 0:
             self.ratio_actor_mean = nn.Sequential(
-                layer_init(nn.Linear((self.args.use_global_features_ratio+self.args.hierarchical_action*2)*self.hidden_dim, 32)),
+                layer_init(nn.Linear((self.args.use_global_features_ratio+self.args.hierarchical_action*2)*self.hidden_dim, self.hidden_dim)),
                 nn.ReLU(),
-                layer_init(nn.Linear(32, 1), std=0.01),
+                layer_init(nn.Linear(self.hidden_dim, 1), std=0.01),
             )
             self.ratio_actor_logstd = nn.Parameter(torch.zeros(1))
         else:
             #Discretized ratio actor
             self.ratio_actor = nn.Sequential(
-                layer_init(nn.Linear((self.args.use_global_features_ratio+self.args.hierarchical_action*2)*self.hidden_dim, 32)),
+                layer_init(nn.Linear((self.args.use_global_features_ratio+self.args.hierarchical_action*2)*self.hidden_dim, self.hidden_dim)),
                 nn.ReLU(),
-                layer_init(nn.Linear(32, self.args.discretized_ratio_bins-(0 if self.args.discretize_include_zero else 1)), std=0.01),
+                layer_init(nn.Linear(self.hidden_dim, self.args.discretized_ratio_bins-(0 if self.args.discretize_include_zero else 1)), std=0.01),
             )
 
     def forward_gnn(self, x, edge_index, edge_attr, batch=None, batch_size=None):
@@ -321,7 +321,7 @@ class PlanetWarsAgentGNN(nn.Module):
                     ratio_logprob[valid_action_idx] = ratio_probs.log_prob(ratio_action_bins.squeeze(-1))
                     ratio_action[valid_action_idx] = (ratio_action_bins + (0 if self.args.discretize_include_zero else 1)) / (self.args.discretized_ratio_bins-1)  # Scale to [0,1]
                 else:
-                    discrete_ratio_action = ratio_action[valid_action_idx] * (self.args.discretized_ratio_bins-1)
+                    discrete_ratio_action = (ratio_action[valid_action_idx] * (self.args.discretized_ratio_bins-1)).round()
                     discrete_ratio_action = discrete_ratio_action.long() - (0 if self.args.discretize_include_zero else 1)
                     ratio_logprob[valid_action_idx] = ratio_probs.log_prob(discrete_ratio_action.squeeze(-1))
 
@@ -419,11 +419,13 @@ class PlanetWarsAgentGNN(nn.Module):
                     ratio_input = global_features
 
                 if self.args.discretized_ratio_bins == 0:
-                    ratio_mean = torch.sigmoid(self.ratio_actor_mean(ratio_input))
+                    ratio_logits = self.ratio_actor_mean(ratio_input)
                     if self.exploit:
-                        ratio_action = ratio_mean
+                        ratio_action = torch.sigmoid(ratio_logits).squeeze(-1)
                     else:
-                        ratio_action = SigmoidTransformedDistribution(ratio_mean, self.ratio_actor_logstd.exp()).sample().squeeze(-1)
+                        ratio_std = self.ratio_actor_logstd.exp()
+                        ratio_std = torch.clamp(ratio_std, max=10.0)
+                        ratio_action = SigmoidTransformedDistribution(ratio_logits, ratio_std).sample().squeeze(-1)
                 else:
                     if self.exploit:
                         ratio_action = torch.argmax(self.ratio_actor(ratio_input), dim=-1) + (0 if self.args.discretize_include_zero else 1)

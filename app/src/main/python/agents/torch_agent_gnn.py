@@ -17,13 +17,16 @@ from gym_utils.gnn_utils import preprocess_graph_data
 
 
 class TorchAgentGNN(PlanetWarsPlayer):
-    def __init__(self, model_class=None, weights_path: Optional[str] = None, model = None):
+    def __init__(self, model_class=None, weights_path: Optional[str] = None, model = None, device: Optional[torch.device] = None):
         super().__init__()
         self.model_class = model_class
         self.weights_path = weights_path
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        if device is not None:
+            self.device = device
+        else:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         if model is not None:
-            self.model = model
+            self.model = model.to(self.device)
         else:
             state_dict = torch.load(weights_path, map_location=self.device, weights_only=False)
             self.model = model_class(state_dict['args']).to(self.device)

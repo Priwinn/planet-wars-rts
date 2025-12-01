@@ -26,6 +26,7 @@ from gym_utils.gym_wrapper import PlanetWarsForwardModelEnv, PlanetWarsForwardMo
 from core.game_state import Player, GameParams
 from agents.mlp import PlanetWarsAgentMLP
 from agents.gnn import PlanetWarsAgentGNN, GraphInstanceToPyG
+from agents.passive_agent import PassiveAgent
 from agents.baseline_policies import GreedyPolicy,RandomPolicy, FocusPolicy, DefensivePolicy
 from agents.GalacticArmada import GalacticArmada
 from agents.random_agents import CarefulRandomAgent, PureRandomAgent
@@ -82,6 +83,10 @@ def make_env(env_id, idx, capture_video, run_name, device, args, self_play=None)
             )
         if args.opponent_type == "greedy":
             env.set_opponent_policy(GreedyPolicy(game_params=env.game_params, player=Player.Player2))
+        elif args.opponent_type == "passive":
+            opponent = PassiveAgent()
+            opponent.prepare_to_play_as(params=GameParams(**env.game_params), player=Player.Player2)
+            env.set_opponent_policy(opponent)
         elif args.opponent_type == "random":
             env.set_opponent_policy(RandomPolicy(game_params=env.game_params, player=Player.Player2))
         elif args.opponent_type == "focus":
@@ -173,7 +178,7 @@ class PlanetWarsActionWrapper(gym.Wrapper):
         return obs, info
 
 if __name__ == "__main__":
-    
+    global_step = 0
     args = tyro.cli(Args)
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
@@ -244,14 +249,14 @@ if __name__ == "__main__":
     if args.model_weights is not None:
         state_dict = torch.load(args.model_weights, map_location=torch.device('cpu'), weights_only=False)
         agent.load_state_dict(state_dict['model_state_dict'])
-    if args.resume_iteration:
         optimizer.load_state_dict(state_dict['optimizer_state_dict'])
+        global_step = state_dict['iteration'] * args.num_envs * args.num_steps
 
     if args.self_play:
         self_play = get_self_play_class(args.self_play)(player_id=2)
         for opponent in args.buffer_opponents:
-            self_play.add_opponent(TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path=opponent))
-        self_play.add_opponent(TorchAgentGNN(model=agent.copy_as_opponent().to(device))) 
+            self_play.add_opponent(TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path=opponent, device=args.opponent_device))
+        self_play.add_opponent(TorchAgentGNN(model=agent.copy_as_opponent(), device=args.opponent_device)) 
         args.use_async = False # Override async setting for self-play
     else:
         self_play = None
@@ -283,9 +288,7 @@ if __name__ == "__main__":
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
 
     # Start the game
-    global_step = 0
-    if args.resume_iteration:
-        global_step = args.resume_iteration * args.num_envs * args.num_steps
+    
     start_time = time.time()
     next_obs, _ = envs.reset(seed=args.seed)
     if args.flatten_observation:
@@ -301,14 +304,19 @@ if __name__ == "__main__":
     episode_rewards = []
     episode_lengths = []
     win_rate = []
+    player_conquers = []
+    neutral_conquers = []
+    planets_lost = []
+    
     os.makedirs("models", exist_ok=True)
 
     ent_coef = args.ent_coef
     start_iteration = 1
     if args.anneal_lr:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.num_iterations)
-        if args.resume_iteration:
-            start_iteration = args.resume_iteration + 1
+        if args.model_weights is not None:
+            scheduler.load_state_dict(state_dict['scheduler_state_dict'])
+            start_iteration = state_dict['iteration'] + 1
 
     for iteration in range(start_iteration, args.num_iterations + 1):
 
@@ -366,26 +374,41 @@ if __name__ == "__main__":
                         episode_lengths.append(episode_length)
                         win = infos.get("leader")[i] == infos.get("controlled_player")[i]
                         win_rate.append(1.0 if win else 0.0)
+                        player_conquers.append(infos.get("controlled_conquers", [0]*args.num_envs)[i])
+                        neutral_conquers.append(infos.get("neutral_conquers", [0]*args.num_envs)[i])
+                        planets_lost.append(infos.get("opponent_conquers", [0]*args.num_envs)[i])
                         lesson_episode_count += 1
 
                         print(f"global_step={global_step}, episodic_return={episode_reward:.3f}, length={episode_length}, win={win}")
                         writer.add_scalar("charts/episodic_return", episode_reward, global_step)
                         writer.add_scalar("charts/episodic_length", episode_length, global_step)
 
+                        #Log conquer stats
+                        writer.add_scalar("conquer_stats/player_conquers", player_conquers[-1], global_step)
+                        writer.add_scalar("conquer_stats/neutral_conquers", neutral_conquers[-1], global_step)
+                        writer.add_scalar("conquer_stats/planets_lost", planets_lost[-1], global_step)
+                        #Conquer_rate relative to number of planets
+                        num_planets = infos.get("num_planets", [args.num_planets_max]*args.num_envs)[i]
+                        neutral_planets = infos.get("neutral_planets", [int(0.3*args.num_planets_max)]*args.num_envs)[i]
+                        writer.add_scalar("conquer_stats/player_conquer_rate", player_conquers[-1]/num_planets, global_step)
+                        writer.add_scalar("conquer_stats/neutral_conquer_rate", neutral_conquers[-1]/neutral_planets, global_step)
+                        writer.add_scalar("conquer_stats/planets_lost_rate", planets_lost[-1]/num_planets, global_step)
+                        writer.add_scalar("conquer_stats/conquer_difference", player_conquers[-1]-planets_lost[-1], global_step)
+
                         # Calculate recent win rate (last 50 episodes)
                         recent_win_rate = np.mean(win_rate[-50:]) if len(win_rate) >= 50 else np.mean(win_rate) if win_rate else 0.0
                         writer.add_scalar("charts/win_rate", recent_win_rate, global_step)
                         writer.add_scalar("charts/lesson_number", lesson_number, global_step)
                          # Reset curriculum step if win rate is good and move to next curriculum step
-                        if recent_win_rate >= 0.8 and lesson_episode_count >= 50 and not args.self_play and lesson_number < args.opponent_baselines.__len__()-1:
-                            args.opponent_type = args.opponent_baselines[lesson_number + 1]  # Switch to next baseline opponent
+                        if recent_win_rate >= 0.8 and lesson_episode_count >= 50 and not args.self_play and lesson_number < args.curriculum_opponents.__len__()-1:
+                            args.opponent_type = args.curriculum_opponents[lesson_number + 1]  # Switch to next baseline opponent
                             print(f"Lesson completed in {curriculum_step} steps, switching to lesson {lesson_number} with opponent type '{args.opponent_type}'")
                             curriculum_step = 0
                             lesson_episode_count = 0
                             lesson_number += 1
                             envs.close()
                             envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
-                        if (recent_win_rate >= 0.8 and lesson_episode_count >= 50) and not args.self_play and lesson_number == args.opponent_baselines.__len__()-1:
+                        if (recent_win_rate >= 0.8 and lesson_episode_count >= 50) and not args.self_play and lesson_number == args.curriculum_opponents.__len__()-1:
                             args.self_play = "baseline_buffer"  # Switch to self-play
                             self_play = get_self_play_class(args.self_play)(player_id=2)
                             print(f"Lesson completed in {curriculum_step} steps, switching to self-play with self-play type '{args.self_play}'.")
@@ -400,13 +423,14 @@ if __name__ == "__main__":
                                 'model_state_dict': agent.state_dict(),
                                 'optimizer_state_dict': optimizer.state_dict(),
                                 'args': args,
+                                'scheduler_state_dict': scheduler.state_dict() if args.anneal_lr else None
                             }, f"models/{args.run_name}_galactic.pt")
                             if args.track:
                                 wandb.save(f"models/{args.run_name}_galactic.pt")
                             
 
                             envs.close()
-                            self_play.add_opponent(TorchAgentGNN(model=agent.copy_as_opponent().to(device)))
+                            self_play.add_opponent(TorchAgentGNN(model=agent.copy_as_opponent(), device=args.opponent_device))
                             args.use_async=False
                             envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
                             envs.reset()
@@ -416,7 +440,7 @@ if __name__ == "__main__":
                             curriculum_step = 0
                             lesson_episode_count = 0
                             lesson_number += 1
-                            self_play.add_opponent(TorchAgentGNN(model=agent.copy_as_opponent().to(device)))
+                            self_play.add_opponent(TorchAgentGNN(model=agent.copy_as_opponent(), device=args.opponent_device))
                             envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
                             envs.reset()
 
@@ -529,7 +553,8 @@ if __name__ == "__main__":
         writer.add_scalar("losses/explained_variance", explained_var, global_step)
         
         # Performance metrics
-        steps_per_second = int(global_step / (time.time() - start_time))
+        steps_per_second = int(args.batch_size / (time.time() - start_time))
+        start_time = time.time()
         mean_reward = rewards[-1000:].mean().item() if len(rewards) > 0 else 0.0
         
         writer.add_scalar("charts/SPS", steps_per_second, global_step)
@@ -546,9 +571,6 @@ if __name__ == "__main__":
         target_neutral_freq = (target_owners == 0).sum().item() / len(target_owners) if len(target_owners) > 0 else 0.0
         target_enemy_freq = (target_owners == 2).sum().item() / len(target_owners) if len(target_owners) > 0 else 0.0
         penalized_noop_freq = penalized_noops / args.batch_size
-        # target_counts = torch.bincount(b_actions[is_op, 1].long(), minlength=args.num_planets_max+1)
-        # source_freq = source_counts.float() / (args.batch_size-source_counts[0].float())  # Exclude no-op action
-        # target_freq = target_counts.float() / args.batch_size
 
         writer.add_scalar("action_stats/mean_action_ratio", ratio_mean, global_step)
         writer.add_scalar("action_stats/std_action_ratio", ratio_std, global_step)
@@ -557,18 +579,7 @@ if __name__ == "__main__":
         writer.add_scalar("action_stats/target_neutral_freq", target_neutral_freq, global_step)
         writer.add_scalar("action_stats/target_enemy_freq", target_enemy_freq, global_step)
         writer.add_scalar("action_stats/penalized_noop_freq", penalized_noop_freq, global_step)
-        # for i in range(args.num_planets_max):
-        #     writer.add_scalar(f"action_stats/source_planet_{i}_freq", source_freq[i+1].item(), global_step)
-        #     writer.add_scalar(f"action_stats/target_planet_{i}_freq", target_freq[i].item(), global_step)
 
-        # Print progress
-        # if iteration % 10 == 0:
-        #     wr = np.mean(win_rate[-50:]) if len(win_rate) >= 50 else np.mean(win_rate) if win_rate else 0.0
-        #     print(f"Iteration {iteration}/{args.num_iterations}")
-        #     print(f"  SPS: {steps_per_second}")
-        #     print(f"  Mean reward: {mean_reward:.3f}")
-        #     print(f"  Recent win rate: {wr:.3f}")
-        #     print(f"  Learning rate: {optimizer.param_groups[0]['lr']:.6f}")
         sys.stdout.flush()
 
         # Save model checkpoint
@@ -578,6 +589,7 @@ if __name__ == "__main__":
                 'model_state_dict': agent.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'args': args,
+                'scheduler_state_dict': scheduler.state_dict() if args.anneal_lr else None
             }, f"models/{args.run_name}_iter_{iteration}.pt")
             if args.track:
                 wandb.save(f"models/{args.run_name}_iter_{iteration}.pt")

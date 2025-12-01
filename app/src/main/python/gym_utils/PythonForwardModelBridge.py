@@ -3,7 +3,7 @@ import time
 from typing import Dict, Any, List, Tuple, Optional, Union
 
 from core.game_state import Player, Action, GameState, GameParams
-from core.forward_model import ForwardModel
+from core.forward_model_extended_metrics import ForwardModelWithMetrics as ForwardModel
 from core.game_state_factory import GameStateFactory
 
 
@@ -36,6 +36,7 @@ class PythonForwardModelBridge:
         
         # Create forward model
         self.forward_model = ForwardModel(self.game_state, self.game_params)
+        self.forward_model.reset_metrics()
         
         return self.get_game_state()
     
@@ -136,6 +137,13 @@ class PythonForwardModelBridge:
             return 0.0
         
         return float(self.forward_model.get_ships(player))
+    
+    def get_player_conquers(self) -> Dict[Player, Dict[str, int]]:
+        """Get the number of planets conquered by each player"""
+        if self.forward_model is None:
+            return {}
+        
+        return self.forward_model.player_conquers
     
     def status_string(self) -> str:
         """Get status string"""
