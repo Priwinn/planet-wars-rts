@@ -98,3 +98,4 @@ wandb/
 !models/PlanetWarsForwardModelGNN__ppo_config__random__1755893274_final.pt
 !models/PlanetWarsForwardModelGNN__ppo_config__random__1755944875_final.pt
 !models/PlanetWarsForwardModelGNN__ppo_config__random__1755984410_final.pt
+/.venv
