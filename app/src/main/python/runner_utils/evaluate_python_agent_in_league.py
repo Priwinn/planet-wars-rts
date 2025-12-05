@@ -29,7 +29,7 @@ def find_project_root(start: Path = Path(__file__)) -> Path:
 
 def run_agent_server(port: int, agent):
     import asyncio
-    agent_server = GameServerAgent(port=port, agent=agent)
+    agent_server = GameServerAgent(host='0.0.0.0', port=port, agent=agent)
     asyncio.run(agent_server.start())
 
 

@@ -2,7 +2,7 @@ Bootstrap: docker
 From: gradle:8.4.0-jdk20
 
 %files
-    . /build
+    ./staging /build
 
 %environment
     export JAVA_HOME=/opt/java/openjdk

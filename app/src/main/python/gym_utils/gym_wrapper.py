@@ -321,9 +321,11 @@ class PlanetWarsForwardModelEnv(gym.Env):
             owner = planet['owner']
             
             # Base score: ship (+ growth rate)
-            if self.args.use_tick:
+            if self.args.use_tick and self.args.gamma<1.0:
                 ticks_left = self.game_params['maxTicks'] - game_state['tick']
                 planet_value = planet['numShips'] + planet['growthRate'] * (1-self.args.gamma**ticks_left)/(1-self.args.gamma)
+            elif self.args.use_tick and self.args.gamma==1.0:
+                planet_value = planet['numShips'] + planet['growthRate'] * (self.game_params['maxTicks']- game_state['tick'])
             else:
                 planet_value = planet['numShips'] + planet['growthRate'] * 100 #np.sqrt(self.game_params['maxTicks']- game_state['tick'])
 

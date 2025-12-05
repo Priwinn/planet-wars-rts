@@ -188,7 +188,10 @@ if __name__ == "__main__":
     args.node_feature_dim = 5 if args.agent_type == "gnn" else 10
     if args.use_tick:
         args.node_feature_dim += 1  # Add tick feature if use_tick is enabled
-    args.run_name = f"{args.env_id}__{args.exp_name}__{args.opponent_type}__{int(time.time())}"
+    if args.exp_name is None:
+        args.run_name = f"{os.path.basename(__file__)[: -len('.py')]}__{int(time.time())}"
+    else:
+        args.run_name = f"{args.exp_name}__{int(time.time())}"
 
     if args.use_async:
         import multiprocessing as mp

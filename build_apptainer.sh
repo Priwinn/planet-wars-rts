@@ -2,6 +2,7 @@
 #$ -cwd
 #$ -N apptainer_build
 #$ -l h_rt=1:00:00
+#$ -pe smp 4
 #$ -o build_output.log
 #$ -e build_error.log
 

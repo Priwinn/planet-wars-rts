@@ -3,7 +3,7 @@ import os
 
 @dataclass
 class Args:
-    exp_name: str = os.path.basename(__file__)[: -len(".py")]
+    exp_name: str = 'ship_delta_cont_gamma_999_use_tick'
     """the name of this experiment"""
     seed: int = 1
     """seed of the experiment"""
@@ -37,7 +37,7 @@ class Args:
     """Toggle learning rate annealing for policy and value networks"""
     anneal_ent_coef: bool = False
     """Toggle entropy coefficient annealing"""
-    gamma: float = 0.999
+    gamma: float = 1.0
     """the discount factor gamma"""
     gae_lambda: float = 0.95
     """the lambda for the general advantage estimation"""
@@ -88,7 +88,7 @@ class Args:
     """Path to save profiling data, if None profiling is disabled"""
     use_async: bool = True
     """if toggled, AsyncVectorEnv will be used"""
-    use_tick: bool = False
+    use_tick: bool = True
     """if toggled, the game tick will be passed as an observation"""
     model_weights: str = None
     """The iteration to resume training from, for annealing purposes"""
@@ -102,7 +102,7 @@ class Args:
     """if toggled, global features from the GNN will be concatenated to the local features in the ratio action head"""
     noop_penalty: float = 0.05
     """penalty for doing nothing action when there are possible actions"""
-    reward_type: str = "score_delta"  # "score_delta", "ship_delta"
+    reward_type: str = "ship_delta"  # "score_delta", "ship_delta"
     """type of reward to use"""
 
 

@@ -12,6 +12,7 @@ from agents.gnn import PlanetWarsAgentGNN
 from agents.ppo import Args
 from agents.random_agents import PureRandomAgent, CarefulRandomAgent  
 import numpy as np
+import sys
 
 # test_agent = GreedyHeuristicAgent()  # replace with your actual agent
 def _fast_agent_eval(test_agent, n_games, game_params, baseline_agents): 
@@ -43,19 +44,27 @@ def _fast_agent_eval_random(test_agent, n_maps, games_per_map, baseline_agents):
         game_params = get_random_game_params()
         print(f"Evaluating on map with params: {game_params}")
         wr.append(_fast_agent_eval(test_agent, n_games=games_per_map, game_params=game_params, baseline_agents=baseline_agents))
+        sys.stdout.flush()
     print(f"Average win rate over {n_maps} maps: {np.mean(wr):.3f} ± {np.std(wr):.3f}")
+    
 
 def _evaluate_agent_in_league(test_agent, port):
     return evaluate_python_agent(test_agent, port=port)
 
 if __name__ == "__main__":
     import os
-    d11 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__passive__1764276287_final.pt")
+    d11_999 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__passive__1764276287_final.pt")
+    cont_1 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__passive__1764449718_final.pt")
+    no_hier_cont_999 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__passive__1764511642_final.pt")
+    d11_1 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__passive__1764450095_iter_3750.pt")
+    cont_999 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__passive__1764572673_final.pt")
+
+
     g=GalacticArmada()
     agh=AggressiveGreedyHeuristicAgent()
     bgh=BetterGreedyHeuristicAgent()
     cgh=CarefulGreedyHeuristicAgent()
     # test_agent = BetterGreedyHeuristicAgent()  # replace with your actual agent
     # _fast_agent_eval(test_agent, n_games=30, game_params=GameParams(num_planets=20), baseline_agents=[CarefulRandomAgent(), BetterGreedyHeuristicAgent()])
-    _fast_agent_eval_random(d11, n_maps=10, games_per_map=10, baseline_agents=[g, bgh, agh])
+    _fast_agent_eval_random(d11_999, n_maps=10, games_per_map=10, baseline_agents=[cont_1, no_hier_cont_999, d11_1, cont_999])
     # _evaluate_agent_in_league(test_agent, port=8080)
