@@ -14,7 +14,8 @@ from typing import List, Dict, Tuple
 from core.game_state import GameParams, Player
 from core.forward_model import ForwardModel
 from core.game_runner import GameRunner
-from agents.random_agents import PureRandomAgent, CarefulRandomAgent  # adjust imports
+from agents.random_agents import PureRandomAgent, CarefulRandomAgent  
+import sys
 
 
 def fast_agent_eval(
@@ -40,6 +41,7 @@ def fast_agent_eval(
         wins = scores.get(Player.Player1, 0)
         average = wins / n_games
         print(f"\nAverage win rate: {average:.3f}")
+        sys.stdout.flush()
 
         total_wins += wins
         total_games += n_games

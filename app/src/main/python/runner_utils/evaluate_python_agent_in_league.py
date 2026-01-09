@@ -29,7 +29,10 @@ def find_project_root(start: Path = Path(__file__)) -> Path:
 
 def run_agent_server(port: int, agent):
     import asyncio
-    agent_server = GameServerAgent(host='0.0.0.0', port=port, agent=agent)
+    from agents.torch_agent_gnn import TorchAgentGNN
+    from agents.gnn import PlanetWarsAgentGNN
+    agent = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999__1765185011_galactic.pt")  
+    agent_server = GameServerAgent(host='localhost', port=port, agent=agent)
     asyncio.run(agent_server.start())
 
 
@@ -47,20 +50,34 @@ def evaluate_python_agent(agent_class: Type, port: int = 49875) -> Tuple[str, fl
 
         # Run Kotlin evaluation
         print("⚙️ Running evaluation via Gradle...")
-        result = subprocess.run(
-            ["gradlew.bat" if os.name == 'nt' else "./gradlew", "runEvaluation", f"--args={port}"],
-            capture_output=True,
+        cmd = [".\\gradlew.bat" if os.name == 'nt' else "./gradlew", "runEvaluation", "--console=plain", f"--args={port}"]
+        
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
+            bufsize=1,
             cwd=cwd
         )
 
-        if result.returncode != 0:
-            raise RuntimeError(f"❌ Evaluation failed:\n{result.stderr}")
+        stdout_lines = []
+        try:
+            for line in proc.stdout:
+                print(line, end='', flush=True)
+                stdout_lines.append(line)
+        finally:
+            proc.stdout.close()
+            returncode = proc.wait()
+
+        full_output = ''.join(stdout_lines)
+
+        if returncode != 0:
+            raise RuntimeError(f"❌ Evaluation failed with code {returncode}")
 
         print("✅ Evaluation complete.")
-        print(result.stdout)
 
-        return result.stdout, extract_avg_win_rate(result.stdout)
+        return full_output, extract_avg_win_rate(full_output)
 
     finally:
         # Terminate agent server process
@@ -73,8 +90,13 @@ if __name__ == "__main__":
     # time how long it takes to run the evaluation
     start_time = time.time()
     from agents.greedy_heuristic_agent import GreedyHeuristicAgent
+    from agents.torch_agent_gnn import TorchAgentGNN
+    from agents.gnn import PlanetWarsAgentGNN
+    agent = GreedyHeuristicAgent()
+    # agent = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999__1765185011_galactic.pt")  
+    # d11_1 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__passive__1764450095_final.pt")
 
-    markdown, average = evaluate_python_agent(GreedyHeuristicAgent, port=8080)
+    markdown, average = evaluate_python_agent(agent, port=47986)
     print("### Evaluation Results")
     print(markdown)
     print(f"Average win rate: {average:.2f}")

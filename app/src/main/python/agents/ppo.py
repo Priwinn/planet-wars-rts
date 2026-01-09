@@ -36,7 +36,7 @@ from agents.aggressive_greedy_heuristic_agent import AggressiveGreedyHeuristicAg
 from agents.torch_agent_gnn import TorchAgentGNN
 from gym_utils.self_play import get_self_play_class
 from gym_utils.gnn_utils import preprocess_graph_data, owner_one_hot_encoding
-from config.ppo_config import Args
+from config_files.ppo_config import Args
 
 def make_env(env_id, idx, capture_video, run_name, device, args, self_play=None):
     def thunk():        

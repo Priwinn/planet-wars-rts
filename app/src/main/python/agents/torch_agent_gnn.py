@@ -1,6 +1,6 @@
 import random
 from typing import Optional, Dict, Any
-from config.ppo_config import Args 
+from config_files.ppo_config import Args 
 import numpy as np
 
 import torch

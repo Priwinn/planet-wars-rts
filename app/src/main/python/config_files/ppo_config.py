@@ -3,7 +3,7 @@ import os
 
 @dataclass
 class Args:
-    exp_name: str = 'ship_delta_cont_gamma_999_use_tick'
+    exp_name: str = 'cont_gamma_1'
     """the name of this experiment"""
     seed: int = 1
     """seed of the experiment"""
@@ -61,14 +61,14 @@ class Args:
     """the target KL divergence threshold"""
 
     # Planet Wars specific
-    agent_type: str = "gnn"  # "mlp" or "gnn"
+    agent_type: str = "gnn"  #"gnn" only supported for now
     num_planets: int = None
     """number of planets in the game. If None, will be set to a random value between num_planets_min and num_planets_max (new_map_each_run needs to be set to true)"""
     num_planets_min: int = 10
     """minimum number of planets in the game"""
     num_planets_max: int = 30
     """maximum number of planets in the game"""
-    node_feature_dim: int = 0 #Filled in runtime 5 for gnn, 14 for mlp
+    node_feature_dim: int = 0 #Filled in runtime 5 for gnn
     """dimension of node features (owner, ship_count, growth_rate, x, y)"""
     max_ticks: int = 2000
     """maximum game ticks"""
@@ -76,7 +76,7 @@ class Args:
     """whether to include adjacency matrix in observations"""
     flatten_observation: bool = True
     """Filled on run time, mlp uses flattened observation, gnn uses graph observation"""
-    discretized_ratio_bins: int = 0
+    discretized_ratio_bins: int = 11
     """number of bins for the discretized ratio actor. Set to 0 to disable discretization"""
     discretize_include_zero: bool = False
     """whether to include zero in the discretized ratio bins"""
@@ -88,7 +88,7 @@ class Args:
     """Path to save profiling data, if None profiling is disabled"""
     use_async: bool = True
     """if toggled, AsyncVectorEnv will be used"""
-    use_tick: bool = True
+    use_tick: bool = False
     """if toggled, the game tick will be passed as an observation"""
     model_weights: str = None
     """The iteration to resume training from, for annealing purposes"""
@@ -102,7 +102,7 @@ class Args:
     """if toggled, global features from the GNN will be concatenated to the local features in the ratio action head"""
     noop_penalty: float = 0.05
     """penalty for doing nothing action when there are possible actions"""
-    reward_type: str = "ship_delta"  # "score_delta", "ship_delta"
+    reward_type: str = "score_delta"  # "score_delta", "ship_delta"
     """type of reward to use"""
 
 

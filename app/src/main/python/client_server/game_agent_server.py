@@ -11,7 +11,7 @@ from agents.planet_wars_agent import PlanetWarsPlayer
 # from agents.mlp import PlanetWarsAgentMLP
 from agents.torch_agent_gnn import TorchAgentGNN
 from agents.gnn import PlanetWarsAgentGNN
-from config.ppo_config import Args 
+from config_files.ppo_config import Args 
 from client_server.util import RemoteInvocationRequest, RemoteInvocationResponse, deserialize_args, serialize_result
 from core.game_state import Player, camel_to_snake
 
@@ -27,7 +27,7 @@ class GameServerAgent:
         async for message in websocket:
             try:
                 request = RemoteInvocationRequest.model_validate_json(message)
-                # print(f"\nReceived: {request}")
+                print(f"\nReceived: {request}")
 
                 if request.requestType == "init":
                     agent_id = str(uuid.uuid4())
