@@ -85,6 +85,7 @@ __pycache__/
 app/src/main/python/runner_utils/competition_entries.py
 
 runs/
+*.sif
 models/*
 bash_scripts/
 venv/
@@ -100,3 +101,4 @@ staging/
 !models/PlanetWarsForwardModelGNN__ppo_config__random__1755944875_final.pt
 !models/PlanetWarsForwardModelGNN__ppo_config__random__1755984410_final.pt
 /.venv
+

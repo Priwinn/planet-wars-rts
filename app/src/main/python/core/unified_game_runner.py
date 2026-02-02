@@ -171,13 +171,17 @@ if __name__ == "__main__":
     import time
     from agents.random_agents import PureRandomAgent, CarefulRandomAgent
     from agents.fully_observable_agent_adapter import as_unified
+    from agents.torch_agent_gnn import TorchAgentGNN
+    from agents.gnn import PlanetWarsAgentGNN
+    d11_999 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__passive__1764276287_final.pt")
+    cont_1 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__passive__1764449718_final.pt")
 
     game_params = GameParams(num_planets=20)
-    n_games = 100  # Number of games for performance test
+    n_games = 10  # Number of games for performance test
 
     # Wrap existing agents using the unified interface
-    agent1 = as_unified(PureRandomAgent())
-    agent2 = as_unified(CarefulRandomAgent())
+    agent1 = as_unified(d11_999)
+    agent2 = as_unified(cont_1)
 
     print("=== Testing Fully Observable Mode ===")
     fully_observable_runner = UnifiedGameRunner(

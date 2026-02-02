@@ -3,7 +3,7 @@ import os
 
 @dataclass
 class Args:
-    exp_name: str = 'cont_gamma_1'
+    exp_name: str = 'cont_gamma_999_no_galactic'
     """the name of this experiment"""
     seed: int = 1
     """seed of the experiment"""
@@ -37,7 +37,7 @@ class Args:
     """Toggle learning rate annealing for policy and value networks"""
     anneal_ent_coef: bool = False
     """Toggle entropy coefficient annealing"""
-    gamma: float = 1.0
+    gamma: float = 0.999
     """the discount factor gamma"""
     gae_lambda: float = 0.95
     """the lambda for the general advantage estimation"""
@@ -76,7 +76,7 @@ class Args:
     """whether to include adjacency matrix in observations"""
     flatten_observation: bool = True
     """Filled on run time, mlp uses flattened observation, gnn uses graph observation"""
-    discretized_ratio_bins: int = 11
+    discretized_ratio_bins: int = 0
     """number of bins for the discretized ratio actor. Set to 0 to disable discretization"""
     discretize_include_zero: bool = False
     """whether to include zero in the discretized ratio bins"""
@@ -109,9 +109,9 @@ class Args:
     # Opponent configuration
     opponent_type: str = "passive" 
     """type of opponent to train against"""
-    curriculum_opponents: list = field(default_factory=lambda: ['passive', 'random', 'careful_random', 'greedy', 'better_greedy', 'galactic'])
+    curriculum_opponents: list = field(default_factory=lambda: ['passive', 'random', 'careful_random', 'greedy', 'better_greedy'])
     """list of (opponent_type, win_rate_threshold) tuples for curriculum learning"""
-    opponent_baselines: list = field(default_factory=lambda: ['better_greedy', 'galactic'])
+    opponent_baselines: list = field(default_factory=lambda: ['better_greedy', 'greedy'])
     """list of baseline opponents to use for self-play. Not implemented yet."""
     self_play: str = None #"naive", "buffer", "baseline_buffer"
     """self-play strategy to use, if applicable"""

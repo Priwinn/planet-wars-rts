@@ -256,7 +256,7 @@ if __name__ == "__main__":
         global_step = state_dict['iteration'] * args.num_envs * args.num_steps
 
     if args.self_play:
-        self_play = get_self_play_class(args.self_play)(player_id=2)
+        self_play = get_self_play_class(args.self_play)(player_id=2, baseline_opponents=args.opponent_baselines)
         for opponent in args.buffer_opponents:
             self_play.add_opponent(TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path=opponent, device=args.opponent_device))
         self_play.add_opponent(TorchAgentGNN(model=agent.copy_as_opponent(), device=args.opponent_device)) 

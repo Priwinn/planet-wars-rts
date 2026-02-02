@@ -41,21 +41,28 @@ class TorchAgentGNN(PlanetWarsPlayer):
     
     def get_action(self, game_state: GameState) -> Action:
 
+        # start = time.time()
         x = self._get_observation(game_state)
+        # time1 = time.time()
+        # print(f"Time to get observation: {time1 - start:.4f} seconds", flush=True)
         x, source_mask = preprocess_graph_data([x], self.player_id, use_tick=self.model.args.use_tick, return_mask=True)
-
+        # time2 = time.time()
+        # print(f"Time to preprocess graph data: {time2 - time1:.4f} seconds", flush=True)
 
         action = self.model.get_action(x.to(self.device), source_mask=source_mask.to(self.device))
+        # time3 = time.time()
+        # print(f"Time for model to get action: {time3 - time2:.4f} seconds", flush=True)
         if action[0] == 0:
             # No-op action, return None
             return Action.do_nothing()
         else:
-            return Action(
+            proposed_action = Action(
                 player_id=self.player,
                 source_planet_id=action[0]-1,
                 destination_planet_id=action[1],
-                num_ships=action[2] * game_state.planets[action[0].int()-1].n_ships,
-        )
+                num_ships=action[2] * game_state.planets[action[0].int()-1].n_ships)
+            final_action = self._override_non_reaching_action(game_state, proposed_action)
+            return final_action
 
     def get_agent_type(self) -> str:
         return "TorchAgent {model_class} {weights_path}".format(
@@ -97,6 +104,16 @@ class TorchAgentGNN(PlanetWarsPlayer):
             1.0 if planet.transporter is not None else 0.0  # Has transporter
         ])
         return features
+    
+    def _override_non_reaching_action(self, game_state: GameState, proposed_action: Action) -> Action:
+        """Override actions that cannot reach the target in time."""
+        source_planet = self._get_planet_by_id(proposed_action.source_planet_id, game_state)
+        destination_planet = self._get_planet_by_id(proposed_action.destination_planet_id, game_state)
+        distance = np.sqrt((source_planet.position.x - destination_planet.position.x) ** 2 +
+                            (source_planet.position.y - destination_planet.position.y) ** 2 - destination_planet.radius)
+        if distance / self.params.transporter_speed > (self.params.max_ticks - game_state.game_tick):
+            return Action.do_nothing()
+        return proposed_action
 
     def _get_transporter_features(self, planet: Planet, game_state: GameState) -> torch.Tensor:
         """Calculate edge features between two planets. Weight is normalized by game width/height and transporter speed."""

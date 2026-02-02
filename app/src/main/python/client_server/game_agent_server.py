@@ -1,4 +1,5 @@
 import asyncio
+import argparse
 import json
 import uuid
 from websockets import serve
@@ -27,7 +28,8 @@ class GameServerAgent:
         async for message in websocket:
             try:
                 request = RemoteInvocationRequest.model_validate_json(message)
-                print(f"\nReceived: {request}")
+                start=asyncio.get_event_loop().time()
+                # print(f"\nReceived request at time: {request}")
 
                 if request.requestType == "init":
                     agent_id = str(uuid.uuid4())
@@ -51,8 +53,13 @@ class GameServerAgent:
                     # print(f"Invoking method: {method_name} on agent {agent} with args: {request.args}")
                     args = deserialize_args(method_name, request.args)
                     # print(f"Deserialized args: {args}")
+                    preprocess_time = asyncio.get_event_loop().time()
+                    print(f"Preprocessing time for {method_name} took {preprocess_time - start:.4f} seconds")
                     result = method(*args)
+                    postprocess_time = asyncio.get_event_loop().time()
+                    print(f"Method execution time for {method_name} took {postprocess_time - preprocess_time:.4f} seconds")
                     result = serialize_result(result)
+
                 elif request.requestType == "end":
                     removed = self.agent_map.pop(request.objectId, None)
                     msg = "Agent removed" if removed else "No such agent"
@@ -62,7 +69,12 @@ class GameServerAgent:
                     raise ValueError(f"Unknown request type: {request.requestType}")
 
                 response = RemoteInvocationResponse(status="ok", result=result)
-                # print(f"Sending response: {response}")
+                end=asyncio.get_event_loop().time()
+                try:
+                    print(f"Postprocessing time took {end - postprocess_time:.4f} seconds")
+                except Exception:
+                    pass
+                print(f"Sending response took {end - start:.4f} seconds")
 
             except Exception as e:
                 print(f"Error handling message: {e}")
@@ -80,7 +92,16 @@ class GameServerAgent:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Game Server Agent")
+    parser.add_argument("--model_class", type=str, default="PlanetWarsAgentGNN", help="Model class name")
+    parser.add_argument("--weights_path", type=str, default="models/cont_gamma_999__1765185011_final.pt", help="Path to model weights")
+    parser.add_argument("--port", type=int, default=8080, help="Port to run the server on")
+    args = parser.parse_args()
 
-    agent= TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__random__1755984410_final.pt")  
-    asyncio.run(GameServerAgent(host="0.0.0.0", port=8080, agent=agent).start())
+    if args.model_class == "PlanetWarsAgentGNN":
+        agent = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path=args.weights_path)  
+    elif args.model_class == "galactic":
+        from agents.GalacticArmada import GalacticArmada
+        agent = GalacticArmada()
+    asyncio.run(GameServerAgent(host="0.0.0.0", port=args.port, agent=agent).start())
     #Use 0.0.0.0 for container access

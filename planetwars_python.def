@@ -1,0 +1,27 @@
+Bootstrap: docker
+From: python:3.11-slim
+
+%labels
+    Author PRIWINN
+    Version 1.0
+
+%help
+    Apptainer definition generated from Dockerfile. Runs the game agent server by default.
+
+%files
+    requirements.txt requirements.txt
+    app/src/main/python/. /app/
+    models/. /models/
+
+%environment
+    export PYTHONPATH="${PYTHONPATH}:/app"
+
+%post
+    apt-get update && \
+    apt-get install -y --no-install-recommends build-essential && \
+    rm -rf /var/lib/apt/lists/* || true
+
+    pip install --no-cache-dir -r requirements.txt
+
+%runscript
+    exec python -u /app/client_server/game_agent_server.py "$@"
