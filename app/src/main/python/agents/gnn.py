@@ -60,9 +60,6 @@ class PlanetWarsAgentGNN(nn.Module):
             (layer_init_gat(GATv2Conv(self.node_feature_dim, self.hidden_dim//4, heads=4, concat=True, edge_dim=5, add_self_loops=False)), 'x, edge_index, edge_attr -> x'),
             (MeanSubtractionNorm(), 'x, batch -> x'),
             nn.ReLU(),
-            # (layer_init_gat(GATv2Conv(self.hidden_dim, self.hidden_dim//4, heads=4, concat=True, edge_dim=5, add_self_loops=False)), 'x, edge_index, edge_attr -> x'),
-            # (MeanSubtractionNorm(), 'x, batch -> x'),
-            # nn.ReLU(),
             (layer_init_gat(GATv2Conv(self.hidden_dim, self.hidden_dim//4, heads=4, concat=True, edge_dim=5, add_self_loops=False)), 'x, edge_index, edge_attr -> x'),
             nn.ReLU(),
         ])
@@ -71,9 +68,6 @@ class PlanetWarsAgentGNN(nn.Module):
                 (layer_init_gat(GATv2Conv(self.node_feature_dim, self.hidden_dim//4, heads=4, concat=True, edge_dim=5, add_self_loops=False)), 'x, edge_index, edge_attr -> x'),
                 (MeanSubtractionNorm(), 'x, batch -> x'),
                 nn.ReLU(),
-                # (layer_init_gat(GATv2Conv(self.hidden_dim, self.hidden_dim//4, heads=4, concat=True, edge_dim=5, add_self_loops=False)), 'x, edge_index, edge_attr -> x'),
-                # (MeanSubtractionNorm(), 'x, batch -> x'),
-                # nn.ReLU(),
                 (layer_init_gat(GATv2Conv(self.hidden_dim, self.hidden_dim//4, heads=4, concat=True, edge_dim=5, add_self_loops=False)), 'x, edge_index, edge_attr  -> x'),
                 nn.ReLU(),
             ])
@@ -81,19 +75,17 @@ class PlanetWarsAgentGNN(nn.Module):
         #Residual Gated Graph Conv layers
         # self.v_gnn = PyGSequential('x, edge_index, edge_attr, batch', [
         #     (ResGatedGraphConv(self.node_feature_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
+        #     (MeanSubtractionNorm(), 'x, batch -> x'),
         #     nn.ReLU(),
         #     (ResGatedGraphConv(self.hidden_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
         #     nn.ReLU(),
-        #     (ResGatedGraphConv(self.hidden_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
         # ])
         # self.a_gnn = PyGSequential('x, edge_index, edge_attr, batch', [
         #     (ResGatedGraphConv(self.node_feature_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
         #     (MeanSubtractionNorm(), 'x, batch -> x'),
         #     nn.ReLU(),
         #     (ResGatedGraphConv(self.hidden_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
-        #     (MeanSubtractionNorm(), 'x, batch -> x'),
         #     nn.ReLU(),
-        #     (ResGatedGraphConv(self.hidden_dim, self.hidden_dim, edge_dim=5), 'x, edge_index, edge_attr -> x'),
         # ])
 
         # Global graph aggregation

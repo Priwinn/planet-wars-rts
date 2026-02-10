@@ -13,7 +13,7 @@ echo "=== Run job started on $(hostname) at $(date) ==="
 export APPTAINERENV_NSLOTS=$((NSLOTS/2))
 
 # Run the container
-apptainer run planetwars_python.sif --port 8080
-apptainer run planetwars_python.sif --port 8081
+apptainer run apptainer/planetwars_python.sif --port 8080
+apptainer run apptainer/planetwars_python.sif --port 8081
 
 echo "=== Run job finished at $(date) ==="

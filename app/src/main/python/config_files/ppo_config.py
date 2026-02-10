@@ -3,7 +3,7 @@ import os
 
 @dataclass
 class Args:
-    exp_name: str = 'cont_gamma_999_no_galactic'
+    exp_name: str = 'cont_gamma_999_muon'
     """the name of this experiment"""
     seed: int = 1
     """seed of the experiment"""
@@ -109,9 +109,9 @@ class Args:
     # Opponent configuration
     opponent_type: str = "passive" 
     """type of opponent to train against"""
-    curriculum_opponents: list = field(default_factory=lambda: ['passive', 'random', 'careful_random', 'greedy', 'better_greedy'])
+    curriculum_opponents: list = field(default_factory=lambda: ['passive', 'random', 'careful_random', 'greedy', 'better_greedy', 'galactic'])
     """list of (opponent_type, win_rate_threshold) tuples for curriculum learning"""
-    opponent_baselines: list = field(default_factory=lambda: ['better_greedy', 'greedy'])
+    opponent_baselines: list = field(default_factory=lambda: ['better_greedy', 'galactic'])
     """list of baseline opponents to use for self-play. Not implemented yet."""
     self_play: str = None #"naive", "buffer", "baseline_buffer"
     """self-play strategy to use, if applicable"""

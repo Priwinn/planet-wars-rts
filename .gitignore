@@ -90,6 +90,7 @@ models/*
 bash_scripts/
 venv/
 logs/
+pair_logs/
 wandb/
 staging/
 !models/PlanetWarsForwardModel__ppo__random__adj_False__1__1750435224_final.pt

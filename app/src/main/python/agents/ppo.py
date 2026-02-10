@@ -245,7 +245,7 @@ if __name__ == "__main__":
         agent = PlanetWarsAgentMLP(args).to(device)
     if args.optimizer == "muon":
         from heavyball import ForeachMuon
-        optimizer = ForeachMuon(agent.parameters(), lr=args.learning_rate, eps=1e-5, betas=(0.9, 0.99))
+        optimizer = ForeachMuon(agent.parameters(), lr=args.learning_rate, eps=1e-4, betas=(0.9, 0.99))
     else:
         optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5, fused=True)
 

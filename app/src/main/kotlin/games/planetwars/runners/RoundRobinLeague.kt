@@ -89,7 +89,10 @@ data class RoundRobinLeague(
     fun runPair(agent1: PlanetWarsAgent, agent2: PlanetWarsAgent): Map<Player, Int> {
         if (runRemoteAgents) {
             val gameRunner = GameRunnerCoRoutines(agent1, agent2, gameParams, timeoutMillis = timeout)
-            return gameRunner.runGames(gamesPerPair)
+            val scores = gameRunner.runGames(gamesPerPair)
+            println("Average action times: ${gameRunner.getAverageActionTimes()}")
+            println("Timeout counts: ${gameRunner.getTimeoutCount()}")
+            return scores
         } else {
             val gameRunner = GameRunner(agent1, agent2, gameParams)
             return gameRunner.runGames(gamesPerPair)
