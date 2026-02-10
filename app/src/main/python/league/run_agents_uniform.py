@@ -289,6 +289,7 @@ FOOTER_PATTERNS = {
     "WINS_B": re.compile(r"^WINS_B=(\d+)$", re.MULTILINE),
     "DRAWS": re.compile(r"^DRAWS=(\d+)$", re.MULTILINE),
     "TOTAL_GAMES": re.compile(r"^TOTAL_GAMES=(\d+)$", re.MULTILINE),
+    "GAME_PARAMS": re.compile(r"^GAME_PARAMS=(\{.*\})$", re.MULTILINE),
 }
 
 
@@ -433,9 +434,9 @@ def pick_two_uniform_nonquarantined(session: Session) -> Tuple[
 
 
 # ---------- DB write ----------
-def store_matches(session: Session, league_id: int, a: Agent, b: Agent, wins_a: int, wins_b: int, draws: int) -> int:
+def store_matches(session: Session, league_id: int, a: Agent, b: Agent, wins_a: int, wins_b: int, draws: int, game_params: dict) -> int:
     inserted = 0
-    meta = {"mode": "remote_pair"}
+    meta = {"game_params": game_params}
     now = datetime.datetime.now()
 
     for _ in range(wins_a):
@@ -524,13 +525,14 @@ def main(n_pairs: int = 10, league_id: int = LEAGUE_ID) -> None:
 
             wins_a, wins_b = footer["WINS_A"], footer["WINS_B"]
             draws, total = footer["DRAWS"], footer["TOTAL_GAMES"]
+            game_params = footer.get("GAME_PARAMS", {})
 
             now = datetime.datetime.now()
             inst_a.last_seen = now
             inst_b.last_seen = now
             session.commit()
 
-            inserted = store_matches(session, league_id=league_id, a=a, b=b, wins_a=wins_a, wins_b=wins_b, draws=draws)
+            inserted = store_matches(session, league_id=league_id, a=a, b=b, wins_a=wins_a, wins_b=wins_b, draws=draws, game_params=game_params)
             session.commit()
 
             print(

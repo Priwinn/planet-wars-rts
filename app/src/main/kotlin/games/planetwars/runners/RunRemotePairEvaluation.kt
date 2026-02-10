@@ -3,6 +3,8 @@ package games.planetwars.runners
 import games.planetwars.agents.RemoteAgent
 import games.planetwars.core.GameParamGenerator
 import games.planetwars.core.GameParams
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.io.File
 import kotlin.math.roundToInt
 
@@ -107,4 +109,5 @@ fun main(args: Array<String>) {
     println("TOTAL_GAMES=$totalGames")
     println("GPP=$gamesPerPair")
     println("TIMEOUT_MS=$timeoutMs")
+    println("GAME_PARAMS=${Json.encodeToString(params)}")
 }

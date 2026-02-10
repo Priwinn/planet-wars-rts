@@ -9,5 +9,5 @@
 
 cd planet-wars-rts
 echo "Build job started on $(hostname) at $(date)"
-apptainer build --force apptainer/planetwars.sif apptainer/planetwars.def 
+apptainer build --force apptainer/planetwars_python.sif apptainer/planetwars_python.def 
 echo "Build job finished at $(date)"

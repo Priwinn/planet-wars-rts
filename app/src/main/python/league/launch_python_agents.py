@@ -10,7 +10,11 @@ from sqlalchemy.orm import Session
 from agents.planet_wars_agent import PlanetWarsPlayer
 from agents.random_agents import CarefulRandomAgent, PureRandomAgent
 from agents.greedy_heuristic_agent import GreedyHeuristicAgent
+from agents.better_greedy_heuristic_agent import BetterGreedyHeuristicAgent
 from agents.passive_agent import PassiveAgent
+from agents.torch_agent_gnn import TorchAgentGNN
+from agents.gnn import PlanetWarsAgentGNN
+from agents.GalacticArmada import GalacticArmada
 # Add other agents as needed
 
 from client_server.game_agent_server import GameServerAgent
@@ -30,11 +34,23 @@ Base.metadata.create_all(ENGINE)
 # Define the agents we want to launch
 # Name -> Agent Instance
 LOCAL_AGENTS: Dict[str, PlanetWarsPlayer] = {
-    "CarefulRandom": CarefulRandomAgent(),
-    "PureRandom": PureRandomAgent(),
-    "GreedyHeuristic": GreedyHeuristicAgent(),
-    "Passive": PassiveAgent(),
+    "BetterGreedyHeuristic": BetterGreedyHeuristicAgent(),
+    "GalacticArmada": GalacticArmada(),
+    "cont_999_v0": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_v0.pt"),
+    "cont_999_200M": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt")
+    "cont_999_v1": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_999_v1.pt"),
+    "cont_999_v2": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_999_v2.pt"),
+    "cont_1_v0": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_1_v0.pt"),
+    "cont_1_v1": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_1_v1.pt"),
+    "cont_1_v2": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_1_v2.pt"),
+    "d11_999_v0": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/d11_999_v0.pt"),
+    "d11_999_v1": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/d11_999_v1.pt"),
+    "d11_999_v2": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/d11_999_v2.pt"),
+    "d11_1_v0": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/d11_1_v0.pt"),
+    "cont_999_ship_delta": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_999_ship_delta.pt"),
+    "cont_999_no_hier": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_999_no_hier.pt"), 
 }
+
 
 async def launch_server(name: str, agent: PlanetWarsPlayer, port: int):
     """

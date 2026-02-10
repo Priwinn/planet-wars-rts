@@ -29,7 +29,7 @@ class GameServerAgent:
             try:
                 request = RemoteInvocationRequest.model_validate_json(message)
                 start=asyncio.get_event_loop().time()
-                print(f"\nReceived request type: {request.requestType}")
+                # print(f"\nReceived request type: {request.requestType}")
 
                 if request.requestType == "init":
                     agent_id = str(uuid.uuid4())
@@ -74,7 +74,7 @@ class GameServerAgent:
                 #     print(f"Postprocessing time took {end - postprocess_time:.4f} seconds")
                 # except Exception:
                 #     pass
-                print(f"Sending response took {end - start:.4f} seconds")
+                # print(f"Sending response took {end - start:.4f} seconds")
 
             except Exception as e:
                 print(f"Error handling message: {e}")
