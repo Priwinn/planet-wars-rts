@@ -31,13 +31,18 @@ DB_PATH = get_default_db_path()
 ENGINE = create_engine(DB_PATH)
 Base.metadata.create_all(ENGINE)
 
+#Limit torch threads
+import torch
+torch.set_num_threads(8)
+torch.set_num_interop_threads(8)
+
 # Define the agents we want to launch
 # Name -> Agent Instance
 LOCAL_AGENTS: Dict[str, PlanetWarsPlayer] = {
     "BetterGreedyHeuristic": BetterGreedyHeuristicAgent(),
     "GalacticArmada": GalacticArmada(),
     "cont_999_v0": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_v0.pt"),
-    "cont_999_200M": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt")
+    "cont_999_200M": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt"),
     "cont_999_v1": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_999_v1.pt"),
     "cont_999_v2": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_999_v2.pt"),
     "cont_1_v0": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_1_v0.pt"),
