@@ -27,6 +27,8 @@ data class GameRunnerCoRoutines(
     private var agent1ActionTimes = mutableListOf<Long>()
     private var agent2ActionTimes = mutableListOf<Long>()
 
+    private var totalGameTicks = 0
+
     fun runGame(): ForwardModel {
         if (gameParams.newMapEachRun) {
             gameState = GameStateFactory(gameParams).createGame()
@@ -40,6 +42,7 @@ data class GameRunnerCoRoutines(
                 forwardModel.step(actions)
             }
         }
+        totalGameTicks += forwardModel.state.tick
         return forwardModel
     }
 
@@ -131,6 +134,9 @@ data class GameRunnerCoRoutines(
             Player.Player1 to timeoutCount1,
             Player.Player2 to timeoutCount2
         )
+    }
+    fun getTotalGameTicks(): Int {
+        return totalGameTicks
     }
 }
 

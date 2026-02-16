@@ -24,4 +24,4 @@ ENV PYTHONPATH="${PYTHONPATH}:/app"
 EXPOSE 8080
 
 # Run the Python application
-CMD ["python","-u","app/client_server/game_agent_server.py"]
+CMD ["python","-u","app/client_server/game_agent_server.py", "--weights_path", "models/cont_gamma_999_200M__1770074759_final.pt"]
