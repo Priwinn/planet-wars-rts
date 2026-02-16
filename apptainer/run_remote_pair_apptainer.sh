@@ -48,7 +48,7 @@ while ! grep -q "GameServerAgent running" "pair_logs/server1_${date_str}.log"; d
 while ! grep -q "GameServerAgent running" "pair_logs/server2_${date_str}.log"; do sleep 1; done
 
 # Now run the client that connects to both servers
-limit_threads 1 apptainer run apptainer/planetwars.sif $PORT1,$PORT2,50,50 > "pair_logs/client_${date_str}.log" 2>&1
+limit_threads 1 apptainer run apptainer/planetwars.sif $PORT1,$PORT2,1,50 > "pair_logs/client_${date_str}.log" 2>&1
 
 # Cleanup: kill the background servers when client finishes
 kill $SERVER1_PID $SERVER2_PID 2>/dev/null
