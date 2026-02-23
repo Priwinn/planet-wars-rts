@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -432,6 +434,137 @@ class PlanetWarsAgentGNN(nn.Module):
             ], dim=-1)
 
             return action
+        
+    def get_action_samples(self, data, source_mask, num_samples=10, temperatures={'source': 1.0, 'target': 1.0, 'ratio': 1.0}):
+        """Sample multiple actions from the same observation without grad and return the batch of actions."""
+        with torch.no_grad():
+            # Get masks from node features (owner is first feature)
+            num_planets = data.x.size(0)
+
+            node_features, global_features = self.forward_gnn(data.x, data.edge_index, data.edge_attr)
+
+            # Get per-node logits for source selection
+            source_node_logits = self.source_actor(node_features).squeeze(-1)  # [num_nodes]
+            source_logits = source_node_logits.unsqueeze(0)  # [1, num_planets]
+            
+            # Get no-op action logits
+            noop_logits = self.noop_actor(global_features)  # [1]
+            # Concatenate no-op logits with source logits
+            source_logits = torch.cat((noop_logits, source_logits), dim=1)/temperatures['source']  # [1, num_planets + 1]
+
+            # Create masked distributions for source selection
+            source_probs = MaskedCategorical(logits=source_logits, mask=source_mask)
+
+            # Sample
+            if self.exploit:
+                _, source_action = torch.topk(source_probs.probs, num_samples, dim=-1)  # [num_samples]
+                source_action = source_action.squeeze(0)  # Remove batch dimension
+            else:
+                source_action = source_probs.sample((num_samples,)).squeeze(-1)  # [num_samples]
+
+            # Initialize target and ratio actions
+            target_action = torch.zeros(num_samples, dtype=torch.long, device=source_action.device)
+            ratio_action = torch.zeros(num_samples, dtype=torch.float, device=source_action.device)
+            
+            # Only sample target and ratio actions if source action is non-null (not no-op)
+            valid_action_idx = source_action != 0
+            if valid_action_idx.any():
+                source_idx = source_action[valid_action_idx]-1
+                # Get target logits for valid actions
+                if self.args.hierarchical_action:
+                    source_features = node_features[source_idx].unsqueeze(1).expand(-1, num_planets, -1)  # [#valid actions, num_planets, node_feature_dim]
+                    target_features = torch.cat((source_features, node_features.unsqueeze(0).expand(source_idx.size(0), -1, -1)), dim=-1)
+                else:
+                    target_features = node_features
+                target_logits = self.target_actor(target_features).squeeze(-1)/temperatures['target']  # [#valid actions, num_planets]
+
+                # Create target mask (opponent planets only, same as get_action_and_value)
+                if self.args.target_mask == "all":
+                    target_mask = torch.ones((target_logits.size(0), num_planets), dtype=torch.bool, device=source_logits.device)  # All planets
+                elif self.args.target_mask == "enemy":
+                    target_mask = (data.x[:, :3].argmax(dim=-1).unsqueeze(0) == 2).float().expand(target_logits.size(0), -1)
+                elif self.args.target_mask == "not_self":
+                    target_mask = (data.x[:, :3].argmax(dim=-1).unsqueeze(0) != 1).float().expand(target_logits.size(0), -1)
+                elif self.args.target_mask == "not_neutral":
+                    target_mask = (data.x[:, :3].argmax(dim=-1).unsqueeze(0) != 0).float().expand(target_logits.size(0), -1)
+                
+                # Prevent sending to self (source_action - 1 because source_action includes no-op offset)
+                target_mask[torch.arange(valid_action_idx.sum()), source_idx] = False
+                
+                target_probs = MaskedCategorical(logits=target_logits, mask=target_mask)
+                if self.exploit:
+                    target_action[valid_action_idx] = target_probs.probs.argmax(dim=-1)  # [1]
+                else:
+                    target_action[valid_action_idx] = target_probs.sample()  # [1]
+
+                # Get ship ratio distribution from ratio actor
+                if self.args.hierarchical_action and self.args.use_global_features_ratio:
+                    ratio_input = torch.cat((global_features.expand(valid_action_idx.sum(), -1), #Global features
+                                        node_features[source_idx],  # -1 for no-op offset
+                                        node_features[target_action[valid_action_idx]]), dim=-1)
+                elif self.args.hierarchical_action and not self.args.use_global_features_ratio:
+                    ratio_input = torch.cat((
+                                        node_features[source_idx],  # -1 for no-op offset
+                                        node_features[target_action[valid_action_idx]]), dim=-1)
+                elif not self.args.hierarchical_action and self.args.use_global_features_ratio:
+                    ratio_input = global_features.expand(valid_action_idx.sum(), -1)
+
+                if self.args.discretized_ratio_bins == 0:
+                    ratio_logits = self.ratio_actor_mean(ratio_input)
+                    if self.exploit:
+                        ratio_action[valid_action_idx] = torch.sigmoid(ratio_logits).squeeze(-1)
+                    else:
+                        ratio_std = self.ratio_actor_logstd.exp()
+                        ratio_std = torch.clamp(ratio_std, max=10.0)*math.sqrt(temperatures['ratio'])
+                        ratio_action[valid_action_idx] = SigmoidTransformedDistribution(ratio_logits, ratio_std).sample().squeeze(-1)
+                else:#TODO:check this part only tested the continuous ratio actor
+                    if self.exploit:
+                        ratio_action[valid_action_idx] = torch.argmax(self.ratio_actor(ratio_input), dim=-1) + (0 if self.args.discretize_include_zero else 1)
+                    else:
+                        ratio_action[valid_action_idx] = Categorical(logits=self.ratio_actor(ratio_input)).sample() + (0 if self.args.discretize_include_zero else 1)
+                    ratio_action[valid_action_idx] = ratio_action[valid_action_idx].float() / (self.args.discretized_ratio_bins-1)
+            
+            action = torch.stack([
+                source_action.float(),
+                target_action.float(),
+                ratio_action
+            ], dim=-1)
+
+            return action
+            
+
+    # def get_action_topk(self, data, source_mask, k=4):
+    #     """Sample k actions without grad and return the batch of actions."""
+    #     if k <= 1:
+    #         action = self.get_action(data, source_mask)
+    #         return action.unsqueeze(0)
+
+    #     with torch.no_grad():
+    #         if isinstance(data, Batch):
+    #             data_list = data.to_data_list()
+    #         elif isinstance(data, Data):
+    #             data_list = [data]
+    #         elif isinstance(data, (list, tuple)):
+    #             data_list = list(data)
+    #         else:
+    #             raise ValueError("data must be a Data, Batch, or list of Data")
+
+    #         if len(data_list) != 1:
+    #             raise ValueError("get_action_topk expects a single graph input")
+
+    #         batch = Batch.from_data_list(data_list * k)
+    #         if source_mask is None:
+    #             raise ValueError("source_mask is required for get_action_topk")
+
+    #         if source_mask.dim() == 2 and source_mask.size(0) == 1:
+    #             batch_source_mask = source_mask.repeat(k, 1)
+    #         elif source_mask.dim() == 2 and source_mask.size(0) == k:
+    #             batch_source_mask = source_mask
+    #         else:
+    #             raise ValueError("source_mask must have shape [1, num_planets + 1] or [k, num_planets + 1]")
+
+    #         actions, _, _, _ = self.get_action_and_value(batch, action=None, source_mask=batch_source_mask)
+    #         return actions
         
     def copy(self):
         """Create a copy of the agent"""

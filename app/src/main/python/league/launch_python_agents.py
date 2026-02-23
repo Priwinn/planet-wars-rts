@@ -33,28 +33,25 @@ Base.metadata.create_all(ENGINE)
 
 #Limit torch threads
 import torch
-torch.set_num_threads(8)
-torch.set_num_interop_threads(8)
+torch.set_num_threads(4)
+torch.set_num_interop_threads(4)
 
 # Define the agents we want to launch
 # Name -> Agent Instance
+cont200=TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt"),
 LOCAL_AGENTS: Dict[str, PlanetWarsPlayer] = {
-    "BetterGreedyHeuristic": BetterGreedyHeuristicAgent(),
+
     "GalacticArmada": GalacticArmada(),
-    "cont_999_200M_2000": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_iter_2000.pt"),
-    "cont_999_200M_2500": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_iter_2500.pt"),
-    "cont_999_200M_3000": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_iter_3000.pt"),
-    "cont_999_200M_3500": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_iter_3500.pt"),
     "cont_999_200M_4000": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_iter_4000.pt"),
-    "cont_999_200M_4500": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_iter_4500.pt"),
-    "cont_999_200M_5000": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_iter_5000.pt"),
     "cont_999_200M_5500": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_iter_5500.pt"),
-    "cont_999_200M_6000": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_iter_6000.pt"),
-    "cont_999_200M_6500": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_iter_6500.pt"),
     "cont_999_200M_7000": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_iter_7000.pt"),
-    "cont_999_200M_7500": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_iter_7500.pt"),
-    "cont_999_200M_8000": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_iter_8000.pt"),
-    "cont_999_200M": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt")
+    "cont_999_200M": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt"),
+    "cont_top4_999_200M": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt", use_topk_q=True, topk_k=4),
+    "cont_top4_999_200M_no_exploit": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt", use_topk_q=True, topk_k=4, exploit=False),
+    "cont_top8_999_200M": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt", use_topk_q=True, topk_k=8),
+    "cont_top16_999_200M_T2": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt", use_topk_q=True, topk_k=16, temperatures={'source': 2.0, 'target': 2.0, 'ratio': 1.0}, exploit=False),
+    "cont_top4_999_200M_T2": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt", use_topk_q=True, topk_k=4, temperatures={'source': 2.0, 'target': 2.0, 'ratio': 1.0}, exploit=False),
+    "cont_top4_999_200M_selfopp": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt", use_topk_q=True, topk_k=4, opponent_policy=cont200),
 
     # "cont_999_v0": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_v0.pt"),
     # "cont_999_200M": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt"),

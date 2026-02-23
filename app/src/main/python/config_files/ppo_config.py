@@ -3,7 +3,7 @@ import os
 
 @dataclass
 class Args:
-    exp_name: str = 'cont_gamma_999_muon'
+    exp_name: str = 'cont_gamma_999_128h'
     """the name of this experiment"""
     seed: int = 1
     """seed of the experiment"""
@@ -41,7 +41,7 @@ class Args:
     """the discount factor gamma"""
     gae_lambda: float = 0.95
     """the lambda for the general advantage estimation"""
-    num_minibatches: int = 48
+    num_minibatches: int = 24
     """the number of mini-batches"""
     update_epochs: int = 4
     """the K epochs to update the policy"""
@@ -82,7 +82,7 @@ class Args:
     """whether to include zero in the discretized ratio bins"""
     new_map_each_run: bool = True
     """whether to create a new map for each run or use the same map"""
-    hidden_dim: int = 256
+    hidden_dim: int = 128
     """hidden dimension for the layers"""
     profile_path: str = None
     """Path to save profiling data, if None profiling is disabled"""
@@ -91,7 +91,11 @@ class Args:
     use_tick: bool = False
     """if toggled, the game tick will be passed as an observation"""
     model_weights: str = None
-    """The iteration to resume training from, for annealing purposes"""
+    """path to model weights to load (for continuing training)"""
+    resume_training: bool = False
+    """if toggled, training will be resumed from the provided model weights. If false, model weights will be loaded but training will start from iteration 1"""
+    gnn_layer_type: str = "gat"  # "gat", "res_gated"
+    """type of gnn layer to use"""
     hierarchical_action: bool = True
     """if toggled, hierarchical action space will be used (only for gnn agent)"""  
     shared_gnn: bool = False
@@ -112,7 +116,7 @@ class Args:
     curriculum_opponents: list = field(default_factory=lambda: ['passive', 'random', 'careful_random', 'greedy', 'better_greedy', 'galactic'])
     """list of (opponent_type, win_rate_threshold) tuples for curriculum learning"""
     opponent_baselines: list = field(default_factory=lambda: ['better_greedy', 'galactic'])
-    """list of baseline opponents to use for self-play. Not implemented yet."""
+    """list of baseline opponents to use for self-play."""
     self_play: str = None #"naive", "buffer", "baseline_buffer"
     """self-play strategy to use, if applicable"""
     buffer_opponents: list = field(default_factory=lambda: [])

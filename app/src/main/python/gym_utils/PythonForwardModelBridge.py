@@ -1,10 +1,13 @@
 import copy
 import time
 from typing import Dict, Any, List, Tuple, Optional, Union
+import pickle
 
 from core.game_state import Player, Action, GameState, GameParams
 from core.forward_model_extended_metrics import ForwardModelWithMetrics as ForwardModel
+from core.forward_model import ForwardModelDict
 from core.game_state_factory import GameStateFactory
+import copy
 
 
 class PythonForwardModelBridge:
@@ -92,6 +95,10 @@ class PythonForwardModelBridge:
             'player1Ships': float(self.forward_model.get_ships(Player.Player1)),
             'player2Ships': float(self.forward_model.get_ships(Player.Player2))
         }
+    
+    def get_game_state_dict(self) -> Dict[str, Any]:
+        """Return the current game state from dict form"""
+
 
     def _convert_player_to_int(self, player: Player) -> int:
         """Convert Player to integer ID"""
@@ -164,20 +171,28 @@ class PythonForwardModelBridge:
     
     def step_copy(self, actions: Dict[Player, Action]) -> Tuple[Dict[str, Any], 'PythonForwardModelBridge']:
         """Step a copy of the current state (useful for tree search)"""
-        # Create a new bridge
         new_bridge = PythonForwardModelBridge()
         
-        # Copy the current state
-        if self.game_state is not None and self.game_params is not None:
-            new_bridge.game_state = self.game_state.model_copy(deep=True)
-            new_bridge.game_params = self.game_params.model_copy(deep=True)
-            new_bridge.forward_model = ForwardModel(new_bridge.game_state, new_bridge.game_params)
-            
-            # Step the new bridge
-            result = new_bridge.step(actions)
-            return result, new_bridge
-        else:
-            raise ValueError("No game state to copy")
+        # Copy the current state using pickle (faster for complex objects)
+        new_bridge.game_state = pickle.loads(pickle.dumps(self.game_state, protocol=pickle.HIGHEST_PROTOCOL))
+        new_bridge.game_params = self.game_params  # No copy needed 
+        new_bridge.forward_model = ForwardModel(new_bridge.game_state, new_bridge.game_params)
+        
+        # Step the new bridge
+        result = new_bridge.step(actions)
+        return result, new_bridge
+
+        
+    def step_copy_dict(self, actions: Dict[Player, Action]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """Step a copy of the current state and return both the result and the new state dict"""
+
+        new_bridge = PythonForwardModelBridge()
+        new_bridge.game_state = pickle.loads(pickle.dumps(self.game_state, protocol=pickle.HIGHEST_PROTOCOL))
+        new_bridge.game_params = self.game_params
+        new_bridge.forward_model = ForwardModelDict(new_bridge.game_state, new_bridge.game_params)
+        
+        new_bridge.forward_model.step(actions)
+        return new_bridge.game_state
     
     def cleanup(self):
         """Clean up resources (no-op for Python implementation)"""

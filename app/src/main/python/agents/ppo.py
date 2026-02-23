@@ -252,17 +252,24 @@ if __name__ == "__main__":
     if args.model_weights is not None:
         state_dict = torch.load(args.model_weights, map_location=torch.device('cpu'), weights_only=False)
         agent.load_state_dict(state_dict['model_state_dict'])
-        optimizer.load_state_dict(state_dict['optimizer_state_dict'])
-        global_step = state_dict['iteration'] * args.num_envs * args.num_steps
+        if args.resume_training:
+            optimizer.load_state_dict(state_dict['optimizer_state_dict'])
+            global_step = state_dict['iteration'] * args.num_envs * args.num_steps
 
     if args.self_play:
-        self_play = get_self_play_class(args.self_play)(player_id=2, baseline_opponents=args.opponent_baselines)
+        if args.self_play == "baseline_buffer":
+            self_play = get_self_play_class(args.self_play)(player_id=2, baseline_opponents=args.opponent_baselines)
+            self_play_wr = 0.7 
+        else:
+            self_play = get_self_play_class(args.self_play)(player_id=2)
+            self_play_wr = 0.55
         for opponent in args.buffer_opponents:
             self_play.add_opponent(TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path=opponent, device=args.opponent_device))
         self_play.add_opponent(TorchAgentGNN(model=agent.copy_as_opponent(), device=args.opponent_device)) 
         args.use_async = False # Override async setting for self-play
     else:
         self_play = None
+        self_play_wr = 0.7
 
     # Environment setup
     envs = make_vector_env(
@@ -317,7 +324,7 @@ if __name__ == "__main__":
     start_iteration = 1
     if args.anneal_lr:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.num_iterations)
-        if args.model_weights is not None:
+        if args.model_weights is not None and args.resume_training:
             scheduler.load_state_dict(state_dict['scheduler_state_dict'])
             start_iteration = state_dict['iteration'] + 1
 
@@ -413,6 +420,7 @@ if __name__ == "__main__":
                             envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
                         if (recent_win_rate >= 0.8 and lesson_episode_count >= 50) and not args.self_play and lesson_number == args.curriculum_opponents.__len__()-1:
                             args.self_play = "baseline_buffer"  # Switch to self-play
+                            self_play_wr = 0.7
                             self_play = get_self_play_class(args.self_play)(player_id=2)
                             print(f"Lesson completed in {curriculum_step} steps, switching to self-play with self-play type '{args.self_play}'.")
                             curriculum_step = 0
@@ -438,7 +446,7 @@ if __name__ == "__main__":
                             envs = make_vector_env(env_id=args.env_id, capture_video=args.capture_video, run_name=args.run_name, device=device, args=args, self_play=self_play)
                             envs.reset()
 
-                        if (recent_win_rate >= 0.7 and lesson_episode_count >= 50 and args.self_play):
+                        if (recent_win_rate >= self_play_wr and lesson_episode_count >= 50 and args.self_play):
                             print(f"Lesson completed in {curriculum_step} steps, updating opponent policy in self-play.")
                             curriculum_step = 0
                             lesson_episode_count = 0

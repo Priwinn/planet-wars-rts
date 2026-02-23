@@ -26,7 +26,7 @@ ENGINE = create_engine(DB_PATH)
 GAMES_PER_PAIR = 10
 
 # Be kind to Python I/O: 200 ms per remote RPC (was 50 ms)
-REMOTE_TIMEOUT = 50  # ms per remote RPC call
+REMOTE_TIMEOUT = 200  # ms per remote RPC call
 
 # Podman robustness controls
 PODMAN_TIMEOUT_SHORT = 4
@@ -45,7 +45,7 @@ PROBE_CANDIDATES = 6
 LEAGUE_ID = 5  # default league ID for remote pair runs
 
 # Quarantine/backoff when WS blows up
-WS_ERROR_BACKOFF_SECS = 60  # keep problematic agents out of the pool briefly
+WS_ERROR_BACKOFF_SECS = 6000  # keep problematic agents out of the pool briefly
 
 
 # ---------- helpers ----------

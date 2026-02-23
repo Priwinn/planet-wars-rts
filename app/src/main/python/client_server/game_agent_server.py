@@ -2,6 +2,7 @@ import asyncio
 import argparse
 import json
 import uuid
+import torch
 from websockets import serve
 from typing import Dict, Any, Callable
 
@@ -97,6 +98,8 @@ if __name__ == "__main__":
     parser.add_argument("--weights_path", type=str, default="models/cont_gamma_999__1765185011_final.pt", help="Path to model weights")
     parser.add_argument("--port", type=int, default=8080, help="Port to run the server on")
     args = parser.parse_args()
+    torch.set_num_threads(4)
+    torch.set_num_interop_threads(4)
 
     if args.model_class == "PlanetWarsAgentGNN":
         agent = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path=args.weights_path)  
