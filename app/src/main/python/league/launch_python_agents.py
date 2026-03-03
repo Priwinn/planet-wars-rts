@@ -33,12 +33,12 @@ Base.metadata.create_all(ENGINE)
 
 #Limit torch threads
 import torch
-torch.set_num_threads(4)
-torch.set_num_interop_threads(4)
+torch.set_num_threads(6)
+torch.set_num_interop_threads(6)
 
 # Define the agents we want to launch
 # Name -> Agent Instance
-cont200=TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt"),
+cont200=TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt", use_topk_q=False)
 LOCAL_AGENTS: Dict[str, PlanetWarsPlayer] = {
 
     "GalacticArmada": GalacticArmada(),
@@ -52,7 +52,12 @@ LOCAL_AGENTS: Dict[str, PlanetWarsPlayer] = {
     "cont_top16_999_200M_T2": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt", use_topk_q=True, topk_k=16, temperatures={'source': 2.0, 'target': 2.0, 'ratio': 1.0}, exploit=False),
     "cont_top4_999_200M_T2": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt", use_topk_q=True, topk_k=4, temperatures={'source': 2.0, 'target': 2.0, 'ratio': 1.0}, exploit=False),
     "cont_top4_999_200M_selfopp": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt", use_topk_q=True, topk_k=4, opponent_policy=cont200),
-
+    "cont_top16_999_200M_no_exploit": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt", use_topk_q=True, topk_k=16, temperatures={'source': 1.0, 'target': 1.0, 'ratio': 1.0}, exploit=False),
+    "cont_top8_999_200M_selfopp": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt", use_topk_q=True, topk_k=8, opponent_policy=cont200),
+    "cont_top16_999_200M": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt", use_topk_q=True, topk_k=16),
+    "cont_top32_999_128_3750": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_128h_5lr__1771978940_iter_3750.pt", use_topk_q=True, topk_k=32, temperatures={'source': 2.0, 'target': 2.0, 'ratio': 1.0}, exploit=False),
+    "cont_top32_999_128_4000": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_128h_5lr__1771978940_iter_4000.pt", use_topk_q=True, topk_k=32, temperatures={'source': 2.0, 'target': 2.0, 'ratio': 1.0}, exploit=False),
+    "cont_top32_999_128_final": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_128h_5lr__1771978940_final.pt", use_topk_q=True, topk_k=32, temperatures={'source': 2.0, 'target': 2.0, 'ratio': 1.0}, exploit=False),
     # "cont_999_v0": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_v0.pt"),
     # "cont_999_200M": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt"),
     # "cont_999_v1": TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_999_v1.pt"),

@@ -204,13 +204,14 @@ class PlanetWarsAgentGNN(nn.Module):
             value = self.forward_value_gnn(data.x, data.edge_index, data.edge_attr, batch, batch_size)
 
         # Get per-node logits for source selection
+        source_logits = torch.full((batch_size, num_nodes.max()+1), fill_value=torch.finfo(torch.float32).min, device=node_features.device)  # +1 for no-op
         source_node_logits = self.source_actor(node_features).squeeze(-1)  # [num_nodes]
-        source_logits = to_dense_batch(source_node_logits, batch, fill_value=torch.finfo(torch.float32).min)[0]  # [batch_size, max_num_planets]
+        source_logits[:,1:] = to_dense_batch(source_node_logits, batch, fill_value=torch.finfo(torch.float32).min)[0]  # [batch_size, max_num_planets]
         
         # Get no-op action logits
         noop_logits = self.noop_actor(global_features)  # [batch_size]
         # Concatenate no-op logits with source and logits
-        source_logits = torch.cat((noop_logits, source_logits), dim=1)  # [batch_size, num_planets + 1]
+        source_logits[:,0] = noop_logits.squeeze(-1)  # [batch_size, num_planets + 1]
 
         # Create masked distributions for source selection
         source_probs = MaskedCategorical(logits=source_logits, mask=source_mask)
@@ -238,24 +239,28 @@ class PlanetWarsAgentGNN(nn.Module):
         if valid_action_idx.any():
             # Get node mask for valid actions. This returns a mask of nodes belonging to sample observations were the sampled source action is non-null
             valid_batch = valid_action_idx[batch]
+            valid_batch_sum = valid_batch.sum()
+            num_valid_actions = valid_action_idx.sum()
 
             cumulative_nodes = torch.cumsum(num_nodes, dim=0)
             cumulative_nodes = torch.cat((torch.zeros(1, dtype=cumulative_nodes.dtype, device=cumulative_nodes.device), cumulative_nodes[:-1]), dim=0)
             # Get node features for selected valid actions
             source_idx = cumulative_nodes[valid_action_idx] + source_action[valid_action_idx] - 1
+            #Preallocate target features and ratio input for efficiency
+            target_features = torch.zeros((valid_batch_sum, (1+self.args.hierarchical_action)*self.hidden_dim), device=node_features.device)
+            ratio_input = torch.zeros((num_valid_actions, (self.args.use_global_features_ratio+self.args.hierarchical_action*2)*self.hidden_dim), device=node_features.device)
 
             #Concatenate sampled action to target input
-            target_features = select(node_features, valid_batch, dim=0)
+            target_features[torch.arange(valid_batch_sum), self.args.hidden_dim:] = select(node_features, valid_batch, dim=0)
             if self.args.hierarchical_action:
-                source_features = node_features[source_idx].repeat_interleave(num_nodes[valid_action_idx], dim=0)  # [batches with valid actions, num_planets, node_feature_dim]
-                target_features = torch.cat((source_features, target_features), dim=-1)
-                
+                target_features[:, :self.args.hidden_dim] = node_features[source_idx].repeat_interleave(num_nodes[valid_action_idx], dim=0)  # [batches with valid actions, num_planets, node_feature_dim]
+
 
             target_logits = self.target_actor(target_features).squeeze(-1)  # [num_nodes]
 
             # Create target mask (opponent planets + neutral, but not source planet)
             if self.args.target_mask == "all":
-                target_mask = torch.ones(valid_batch.sum(), dtype=torch.bool, device=source_logits.device)  # All planets
+                target_mask = torch.ones(valid_batch_sum, dtype=torch.bool, device=source_logits.device)  # All planets
             elif self.args.target_mask == "enemy":
                 target_mask = (data.x[:, :3].argmax(dim=-1)[valid_batch] == 2).float() 
             elif self.args.target_mask == "not_self":
@@ -263,12 +268,12 @@ class PlanetWarsAgentGNN(nn.Module):
             elif self.args.target_mask == "not_neutral":
                 target_mask = (data.x[:, :3].argmax(dim=-1)[valid_batch] != 0).float() 
 
-            dense_valid_batch_idx = torch.arange(valid_action_idx.sum(), device=source_logits.device).repeat_interleave(num_nodes[valid_action_idx])
+            dense_valid_batch_idx = torch.arange(num_valid_actions, device=source_logits.device).repeat_interleave(num_nodes[valid_action_idx])
             dense_target_logits = to_dense_batch(target_logits, dense_valid_batch_idx, fill_value=torch.finfo(torch.float32).min)[0]  # [batch_size, max_num_planets]
 
             # Prevent sending to self
             target_mask = to_dense_batch(target_mask, dense_valid_batch_idx, fill_value=False)[0]  # [batch_size, max_num_planets]
-            target_mask[torch.arange(valid_action_idx.sum()), source_action[valid_action_idx]-1] = False
+            target_mask[torch.arange(num_valid_actions), source_action[valid_action_idx]-1] = False
 
             target_probs = MaskedCategorical(logits=dense_target_logits, mask=target_mask)
 
@@ -281,15 +286,13 @@ class PlanetWarsAgentGNN(nn.Module):
 
             # Get ship ratio distribution, we use sampled source and target node features and global features
             if self.args.hierarchical_action and self.args.use_global_features_ratio:
-                ratio_input = torch.cat((global_features[valid_action_idx], #Global features
-                                    node_features[source_idx], # Source node features
-                                    node_features[cumulative_nodes[valid_action_idx] + valid_target_action] # Target node features
-                                    ), dim=-1) 
+                ratio_input[:, :self.hidden_dim] = global_features[valid_action_idx]
+                ratio_input[:, self.hidden_dim:self.hidden_dim*2] = node_features[source_idx]
+                ratio_input[:, self.hidden_dim*2:] = node_features[cumulative_nodes[valid_action_idx] + valid_target_action]
+
             elif self.args.hierarchical_action and not self.args.use_global_features_ratio:
-                ratio_input = torch.cat((
-                                    node_features[source_idx], # Source node features
-                                    node_features[cumulative_nodes[valid_action_idx] + valid_target_action] # Target node features
-                                    ), dim=-1)
+                ratio_input[:, :self.hidden_dim] = node_features[source_idx]
+                ratio_input[:, self.hidden_dim:self.hidden_dim*2] = node_features[cumulative_nodes[valid_action_idx] + valid_target_action]
             elif not self.args.hierarchical_action and self.args.use_global_features_ratio:
                 ratio_input = global_features[valid_action_idx]
 
@@ -347,15 +350,17 @@ class PlanetWarsAgentGNN(nn.Module):
             num_planets = data.x.size(0)
 
             node_features, global_features = self.forward_gnn(data.x, data.edge_index, data.edge_attr)
+            #Preallocate source logits for efficiency
+            source_logits = torch.full((1, num_planets+1), fill_value=torch.finfo(torch.float32).min, device=node_features.device)  # +1 for no-op
 
             # Get per-node logits for source selection
             source_node_logits = self.source_actor(node_features).squeeze(-1)  # [num_nodes]
-            source_logits = source_node_logits.unsqueeze(0)  # [1, num_planets]
+            source_logits[0,1:] = source_node_logits.unsqueeze(0)  # [1, num_planets]
             
             # Get no-op action logits
             noop_logits = self.noop_actor(global_features)  # [1]
             # Concatenate no-op logits with source logits
-            source_logits = torch.cat((noop_logits, source_logits), dim=1)  # [1, num_planets + 1]
+            source_logits[0,0] = noop_logits  # [1, num_planets + 1]
 
             # Create masked distributions for source selection
             source_probs = MaskedCategorical(logits=source_logits, mask=source_mask)
@@ -373,10 +378,15 @@ class PlanetWarsAgentGNN(nn.Module):
             # Only sample target and ratio actions if source action is non-null (not no-op)
             valid_action_idx = source_action != 0
             if valid_action_idx.any():
+                #Preallocate target features and ratio input for efficiency
+                target_features = torch.zeros((num_planets, (1+self.args.hierarchical_action)*self.hidden_dim), device=node_features.device)
+                ratio_input = torch.zeros((1, (self.args.use_global_features_ratio+self.args.hierarchical_action*2)*self.hidden_dim), device=node_features.device)
+
                 # Get target logits for valid actions
                 if self.args.hierarchical_action:
-                    source_features = node_features[source_action[valid_action_idx]-1].expand(num_planets, -1)  # [batches with valid actions, num_planets, node_feature_dim]
-                    target_features = torch.cat((source_features, node_features), dim=-1)
+                    target_features[:, :self.args.hidden_dim] = node_features[source_action[valid_action_idx]-1].expand(num_planets, -1)  # [batches with valid actions, num_planets, node_feature_dim]
+                    
+                    target_features[:, self.args.hidden_dim:] = node_features  # [num_planets, node_feature_dim]
                 else:
                     target_features = node_features
                 target_logits = self.target_actor(target_features).squeeze(-1).unsqueeze(0)  # [1, num_planets]
@@ -402,13 +412,13 @@ class PlanetWarsAgentGNN(nn.Module):
 
                 # Get ship ratio distribution from ratio actor
                 if self.args.hierarchical_action and self.args.use_global_features_ratio:
-                    ratio_input = torch.cat((global_features,
-                                        node_features[source_action[0] - 1].unsqueeze(0),  # -1 for no-op offset
-                                        node_features[target_action[0]].unsqueeze(0)), dim=-1)
+                    ratio_input[0,:self.args.hidden_dim] = global_features
+                    ratio_input[0,self.args.hidden_dim:self.args.hidden_dim*2] = node_features[source_action[0] - 1]  # -1 for no-op offset
+                    ratio_input[0,self.args.hidden_dim*2:] = node_features[target_action[0]]
                 elif self.args.hierarchical_action and not self.args.use_global_features_ratio:
-                    ratio_input = torch.cat((
-                                        node_features[source_action[0] - 1].unsqueeze(0),  # -1 for no-op offset
-                                        node_features[target_action[0]].unsqueeze(0)), dim=-1)
+                    ratio_input[0,:self.args.hidden_dim] = node_features[source_action[0] - 1]  # -1 for no-op offset
+                    ratio_input[0,self.args.hidden_dim:self.args.hidden_dim*2] = node_features[target_action[0]]
+
                 elif not self.args.hierarchical_action and self.args.use_global_features_ratio:
                     ratio_input = global_features
 
@@ -440,17 +450,23 @@ class PlanetWarsAgentGNN(nn.Module):
         with torch.no_grad():
             # Get masks from node features (owner is first feature)
             num_planets = data.x.size(0)
+            if self.exploit:
+                num_samples = min(num_samples, num_planets)  # Cannot sample more actions than number of planets
 
             node_features, global_features = self.forward_gnn(data.x, data.edge_index, data.edge_attr)
 
+            #Preallocate outputs/inputs for efficiency
+            source_logits = torch.zeros((1, num_planets+1), device=node_features.device)  # +1 for no-op
+
             # Get per-node logits for source selection
             source_node_logits = self.source_actor(node_features).squeeze(-1)  # [num_nodes]
-            source_logits = source_node_logits.unsqueeze(0)  # [1, num_planets]
+            source_logits[0, 1:] = source_node_logits  # [1, num_planets]
             
             # Get no-op action logits
             noop_logits = self.noop_actor(global_features)  # [1]
+            source_logits[0, 0] = noop_logits  # Set no-op logits in the first column
             # Concatenate no-op logits with source logits
-            source_logits = torch.cat((noop_logits, source_logits), dim=1)/temperatures['source']  # [1, num_planets + 1]
+            source_logits = source_logits/temperatures['source']  # [1, num_planets + 1]
 
             # Create masked distributions for source selection
             source_probs = MaskedCategorical(logits=source_logits, mask=source_mask)
@@ -465,15 +481,31 @@ class PlanetWarsAgentGNN(nn.Module):
             # Initialize target and ratio actions
             target_action = torch.zeros(num_samples, dtype=torch.long, device=source_action.device)
             ratio_action = torch.zeros(num_samples, dtype=torch.float, device=source_action.device)
-            
+
+
+
             # Only sample target and ratio actions if source action is non-null (not no-op)
             valid_action_idx = source_action != 0
             if valid_action_idx.any():
+                #Initialize target and ratio inputs
+                num_valid_actions = valid_action_idx.sum()
+                if self.args.hierarchical_action:
+                    target_features = torch.zeros((num_valid_actions, num_planets, 2 * self.args.hidden_dim), device=node_features.device)
+                else:
+                    target_features = torch.zeros((num_valid_actions,num_planets, self.args.hidden_dim), device=node_features.device)
+                if self.args.hierarchical_action and self.args.use_global_features_ratio:
+                    ratio_input = torch.zeros((num_valid_actions, 3 * self.args.hidden_dim), device=node_features.device)
+                elif self.args.hierarchical_action and not self.args.use_global_features_ratio:
+                    ratio_input = torch.zeros((num_valid_actions, 2 * self.args.hidden_dim), device=node_features.device)
+                elif not self.args.hierarchical_action and self.args.use_global_features_ratio:
+                    ratio_input = torch.zeros((num_valid_actions, self.args.hidden_dim), device=node_features.device)
+
                 source_idx = source_action[valid_action_idx]-1
                 # Get target logits for valid actions
                 if self.args.hierarchical_action:
-                    source_features = node_features[source_idx].unsqueeze(1).expand(-1, num_planets, -1)  # [#valid actions, num_planets, node_feature_dim]
-                    target_features = torch.cat((source_features, node_features.unsqueeze(0).expand(source_idx.size(0), -1, -1)), dim=-1)
+                    target_features[:, :, :self.args.hidden_dim] = node_features[source_idx].unsqueeze(1).expand(-1, num_planets, -1)  # [#valid actions, num_planets, node_feature_dim]
+
+                    target_features[:, :, self.args.hidden_dim:] = node_features.unsqueeze(0).expand(source_idx.size(0), -1, -1)  # [#valid actions, num_planets, node_feature_dim]
                 else:
                     target_features = node_features
                 target_logits = self.target_actor(target_features).squeeze(-1)/temperatures['target']  # [#valid actions, num_planets]
@@ -489,7 +521,7 @@ class PlanetWarsAgentGNN(nn.Module):
                     target_mask = (data.x[:, :3].argmax(dim=-1).unsqueeze(0) != 0).float().expand(target_logits.size(0), -1)
                 
                 # Prevent sending to self (source_action - 1 because source_action includes no-op offset)
-                target_mask[torch.arange(valid_action_idx.sum()), source_idx] = False
+                target_mask[torch.arange(num_valid_actions), source_idx] = False
                 
                 target_probs = MaskedCategorical(logits=target_logits, mask=target_mask)
                 if self.exploit:
@@ -499,15 +531,21 @@ class PlanetWarsAgentGNN(nn.Module):
 
                 # Get ship ratio distribution from ratio actor
                 if self.args.hierarchical_action and self.args.use_global_features_ratio:
-                    ratio_input = torch.cat((global_features.expand(valid_action_idx.sum(), -1), #Global features
-                                        node_features[source_idx],  # -1 for no-op offset
-                                        node_features[target_action[valid_action_idx]]), dim=-1)
+                    ratio_input [:, :self.args.hidden_dim] = global_features.expand(num_valid_actions, -1) #Global features
+                    ratio_input[:, self.args.hidden_dim:self.args.hidden_dim*2] = node_features[source_idx]  # Source node features
+                    ratio_input[:, self.args.hidden_dim*2:] = node_features[target_action[valid_action_idx]]  # Target node features
+                    # ratio_input = torch.cat((global_features.expand(valid_action_idx.sum(), -1), #Global features
+                    #                     node_features[source_idx],  # -1 for no-op offset
+                    #                     node_features[target_action[valid_action_idx]]), dim=-1)
                 elif self.args.hierarchical_action and not self.args.use_global_features_ratio:
-                    ratio_input = torch.cat((
-                                        node_features[source_idx],  # -1 for no-op offset
-                                        node_features[target_action[valid_action_idx]]), dim=-1)
+                    ratio_input[:, :self.args.hidden_dim] = node_features[source_idx]  # Source node features
+                    ratio_input[:, self.args.hidden_dim:] = node_features[target_action[valid_action_idx]]  # Target node features
+
+                    # ratio_input = torch.cat((
+                    #                     node_features[source_idx],  # -1 for no-op offset
+                    #                     node_features[target_action[valid_action_idx]]), dim=-1)
                 elif not self.args.hierarchical_action and self.args.use_global_features_ratio:
-                    ratio_input = global_features.expand(valid_action_idx.sum(), -1)
+                    ratio_input = global_features.expand(num_valid_actions, -1)
 
                 if self.args.discretized_ratio_bins == 0:
                     ratio_logits = self.ratio_actor_mean(ratio_input)
@@ -531,40 +569,9 @@ class PlanetWarsAgentGNN(nn.Module):
             ], dim=-1)
 
             return action
+        
             
 
-    # def get_action_topk(self, data, source_mask, k=4):
-    #     """Sample k actions without grad and return the batch of actions."""
-    #     if k <= 1:
-    #         action = self.get_action(data, source_mask)
-    #         return action.unsqueeze(0)
-
-    #     with torch.no_grad():
-    #         if isinstance(data, Batch):
-    #             data_list = data.to_data_list()
-    #         elif isinstance(data, Data):
-    #             data_list = [data]
-    #         elif isinstance(data, (list, tuple)):
-    #             data_list = list(data)
-    #         else:
-    #             raise ValueError("data must be a Data, Batch, or list of Data")
-
-    #         if len(data_list) != 1:
-    #             raise ValueError("get_action_topk expects a single graph input")
-
-    #         batch = Batch.from_data_list(data_list * k)
-    #         if source_mask is None:
-    #             raise ValueError("source_mask is required for get_action_topk")
-
-    #         if source_mask.dim() == 2 and source_mask.size(0) == 1:
-    #             batch_source_mask = source_mask.repeat(k, 1)
-    #         elif source_mask.dim() == 2 and source_mask.size(0) == k:
-    #             batch_source_mask = source_mask
-    #         else:
-    #             raise ValueError("source_mask must have shape [1, num_planets + 1] or [k, num_planets + 1]")
-
-    #         actions, _, _, _ = self.get_action_and_value(batch, action=None, source_mask=batch_source_mask)
-    #         return actions
         
     def copy(self):
         """Create a copy of the agent"""

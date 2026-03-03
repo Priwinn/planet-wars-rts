@@ -33,7 +33,7 @@ if __name__ == "__main__":
 
         # 2. Run the league (blocking)
         print("🏁 Starting league run...")
-        run_agents_trueskill(4)
+        run_agents_trueskill(3)
         print("✅ League run finished.")
 
     except KeyboardInterrupt:

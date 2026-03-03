@@ -23,7 +23,7 @@ from league.league_ratings import process_new_matches_and_update_ratings, ensure
 # ---------- config ----------
 DB_PATH = get_default_db_path()
 ENGINE = create_engine(DB_PATH)
-GAMES_PER_PAIR = 10
+GAMES_PER_PAIR = 8
 
 # Be kind to Python I/O: 200 ms per remote RPC (was 50 ms)
 REMOTE_TIMEOUT = 200  # ms per remote RPC call
@@ -560,4 +560,4 @@ def main(n_pairs: int = 10, league_id: int = LEAGUE_ID) -> None:
 
 if __name__ == "__main__":
     # Default to 10 pairs per invocation, mirroring your previous script behavior.
-    main(10)
+    main(5)

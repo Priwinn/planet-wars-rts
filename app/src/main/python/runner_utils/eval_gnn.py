@@ -26,7 +26,7 @@ def _fast_agent_eval(test_agent, n_games, game_params, baseline_agents):
 
 def get_random_game_params():
     game_params={
-                    'numPlanets': 30, #np.random.randint(10, 31),
+                    'numPlanets': np.random.randint(10, 31),
                     'maxTicks': 2000,
                     'transporterSpeed': np.random.uniform(2.0, 5.0),
                     'width': 640,
@@ -54,11 +54,16 @@ if __name__ == "__main__":
     import os
     from agents.torch_agent_gnn import TorchAgentGNN
     from agents.gnn import PlanetWarsAgentGNN
-    d11_999 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__passive__1764276287_final.pt")
-    cont_1 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__passive__1764449718_final.pt")
-    no_hier_cont_999 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__passive__1764511642_final.pt")
-    d11_1 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__passive__1764450095_final.pt")
-    cont_999 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__passive__1764572673_final.pt")
+    # d11_999 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__passive__1764276287_final.pt")
+    # cont_1 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__passive__1764449718_final.pt")
+    # no_hier_cont_999 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__passive__1764511642_final.pt")
+    # d11_1 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__passive__1764450095_final.pt")
+    # cont_999 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/PlanetWarsForwardModelGNN__ppo_config__passive__1764572673_final.pt")
+    # agent_opp = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt", use_topk_q=False)
+    agent = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_200M__1770074759_final.pt")
+    agent2 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_128h_5lr__1771978940_iter_3750.pt")
+    agent3 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_128h_5lr__1771978940_iter_4000.pt")
+    agent4 = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_128h_5lr__1771978940_final.pt")
 
 
     g=GalacticArmada()
@@ -67,5 +72,5 @@ if __name__ == "__main__":
     cgh=CarefulGreedyHeuristicAgent()
     # test_agent = BetterGreedyHeuristicAgent()  # replace with your actual agent
     # _fast_agent_eval(test_agent, n_games=30, game_params=GameParams(num_planets=20), baseline_agents=[CarefulRandomAgent(), BetterGreedyHeuristicAgent()])
-    _fast_agent_eval_random(cont_999, n_maps=10, games_per_map=10, baseline_agents=[g])
+    _fast_agent_eval_random(agent4, n_maps=10, games_per_map=10, baseline_agents=[agent,agent2, agent3])
     # _evaluate_agent_in_league(test_agent, port=8080)

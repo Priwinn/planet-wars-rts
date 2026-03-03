@@ -3,7 +3,7 @@ import os
 
 @dataclass
 class Args:
-    exp_name: str = 'cont_gamma_999_128h'
+    exp_name: str = 'cont_gamma_999_128h_5lr'
     """the name of this experiment"""
     seed: int = 1
     """seed of the experiment"""
@@ -23,15 +23,15 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "PlanetWarsForwardModel"
     """the id of the environment. Filled in runtime, either `PlanetWarsForwardModel` or `PlanetWarsForwardModelGNN` according to agent type"""
-    total_timesteps: int = 100000000
+    total_timesteps: int = 200000000
     """total timesteps of the experiments"""
-    learning_rate: float = 2e-4
+    learning_rate: float = 5e-4
     """the learning rate of the optimizer"""
     optimizer: str = "adam"
     """the optimizer to use: 'adam' or 'muon'"""
     num_envs: int = 24
     """the number of parallel game environments"""
-    num_steps: int = 1024
+    num_steps: int = 2048
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
@@ -41,7 +41,7 @@ class Args:
     """the discount factor gamma"""
     gae_lambda: float = 0.95
     """the lambda for the general advantage estimation"""
-    num_minibatches: int = 24
+    num_minibatches: int = 48
     """the number of mini-batches"""
     update_epochs: int = 4
     """the K epochs to update the policy"""

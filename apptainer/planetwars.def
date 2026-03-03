@@ -36,4 +36,4 @@ From: gradle:8.4.0-jdk21
     echo "+++ POST: Build complete at $(date) +++"
 
 %runscript
-    exec java -cp /app/app.jar "games.planetwars.runners.RunRemotePairEvaluationKt" "$@"
+    exec java -cp /app/app.jar "games.planetwars.runners.EvaluateAgentKt" "$@"

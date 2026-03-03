@@ -38,37 +38,21 @@ from gym_utils.self_play import get_self_play_class
 from gym_utils.gnn_utils import preprocess_graph_data, owner_one_hot_encoding
 from config_files.ppo_config import Args
 
+def get_opponent_from_string(opponent_tye):
+    if opponent_tye == "better_greedy":
+        return BetterGreedyHeuristicAgent()
+    elif opponent_tye == "galactic":
+        return GalacticArmada()
+    else:
+        raise ValueError(f"Unknown opponent type: {opponent_tye}")
+
 def make_env(env_id, idx, capture_video, run_name, device, args, self_play=None):
     def thunk():        
-
-
-        if env_id == "PlanetWarsForwardModel":
-            env = PlanetWarsForwardModelEnv(
-                args,
-                controlled_player=Player.Player1,
-                opponent_player=Player.Player2,
-                max_ticks=args.max_ticks,
-                game_params={
-                    'numPlanets': args.num_planets,
-                    'maxTicks': args.max_ticks,
-                    'transporterSpeed': 3.0,
-                    'width': 640,
-                    'height': 480,
-                    'newMapEachRun': args.new_map_each_run
-                }
-            )
-        elif env_id == "PlanetWarsForwardModelGNN":
-            if args.num_planets is None:
-                num_planets = np.random.randint(args.num_planets_min, args.num_planets_max + 1)
-            else:
-                num_planets = args.num_planets
-
-            env = PlanetWarsForwardModelGNNEnv(
-                args,
-                controlled_player=Player.Player1,
-                opponent_player=Player.Player2,
-                max_ticks=args.max_ticks,
-                game_params={
+        if args.num_planets is None:
+            num_planets = np.random.randint(args.num_planets_min, args.num_planets_max + 1)
+        else:
+            num_planets = args.num_planets
+        game_params = {
                     'numPlanets': num_planets,
                     'maxTicks': args.max_ticks,
                     'transporterSpeed': np.random.uniform(2.0, 5.0),
@@ -78,7 +62,24 @@ def make_env(env_id, idx, capture_video, run_name, device, args, self_play=None)
                     'minGrowthRate': 0.05,
                     'maxGrowthRate': 0.2,
                     'initialNeutralRatio': np.random.uniform(0.25, 0.35)
-                },
+                }
+
+        if env_id == "PlanetWarsForwardModel":
+            env = PlanetWarsForwardModelEnv(
+                args,
+                controlled_player=Player.Player1,
+                opponent_player=Player.Player2,
+                max_ticks=args.max_ticks,
+                game_params=game_params
+            )
+        elif env_id == "PlanetWarsForwardModelGNN":
+
+            env = PlanetWarsForwardModelGNNEnv(
+                args,
+                controlled_player=Player.Player1,
+                opponent_player=Player.Player2,
+                max_ticks=args.max_ticks,
+                game_params=game_params,
                 self_play= self_play if args.self_play else None
             )
         if args.opponent_type == "greedy":
@@ -258,7 +259,8 @@ if __name__ == "__main__":
 
     if args.self_play:
         if args.self_play == "baseline_buffer":
-            self_play = get_self_play_class(args.self_play)(player_id=2, baseline_opponents=args.opponent_baselines)
+            baseline_opponents = [get_opponent_from_string(opp) for opp in args.opponent_baselines]
+            self_play = get_self_play_class(args.self_play)(player_id=2, baseline_opponents=baseline_opponents)
             self_play_wr = 0.7 
         else:
             self_play = get_self_play_class(args.self_play)(player_id=2)

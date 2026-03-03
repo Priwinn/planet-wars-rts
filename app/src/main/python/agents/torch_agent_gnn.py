@@ -79,13 +79,14 @@ class TorchAgentGNN(PlanetWarsPlayer):
             return final_action
 
     def get_agent_type(self) -> str:
-        return "TorchAgent {weights_path} topq{use_topk_q} {topk_k} ex{exploit} T{temperatures}".format(
+        return "TorchAgent {weights_path} topq{use_topk_q} {topk_k} ex{exploit} T{temperatures} opp{opponent_policy}".format(
             model_class=self.model_class.__name__ if self.model_class else "None",
             weights_path=self.weights_path if self.weights_path else "None",
             use_topk_q=self.use_topk_q,
             topk_k=self.topk_k,
             exploit=self.model.exploit if hasattr(self.model, 'exploit') else False,
-            temperatures=self.temperatures
+            temperatures=self.temperatures,
+            opponent_policy=self.opponent_policy.__class__.__name__ if self.opponent_policy else "None"
         )
 
     def set_opponent_policy(self, opponent_policy: Optional[callable]) -> None:
@@ -177,7 +178,7 @@ class TorchAgentGNN(PlanetWarsPlayer):
 
     def _evaluate_actions_q(self, actions: torch.Tensor, game_state: GameState) -> torch.Tensor:
         base_bridge = self._build_bridge_from_state(game_state)
-        opponent_action = self._get_opponent_action(base_bridge)
+        opponent_action = self._get_opponent_action(game_state)
         q_values = []
         gamma = getattr(self.model.args, "gamma", 1.0)
         states = []
@@ -214,14 +215,12 @@ class TorchAgentGNN(PlanetWarsPlayer):
         bridge.forward_model = ForwardModelDict(bridge.game_state, bridge.game_params)
         return bridge
 
-    def _get_opponent_action(self, bridge: PythonForwardModelBridge) -> Action:
+    def _get_opponent_action(self, game_state: GameState) -> Action:
         if self.opponent_policy is None:
             return Action.do_nothing()
         if isinstance(self.opponent_policy, PlanetWarsPlayer):
-            return self.opponent_policy.get_action(bridge.game_state)
-        if callable(self.opponent_policy):
-            return self.opponent_policy(bridge.get_game_state())
-        raise TypeError("opponent_policy must be a PlanetWarsPlayer or callable")
+            return self.opponent_policy.get_action(game_state)
+        raise TypeError("opponent_policy must be a PlanetWarsPlayer ")
 
     def _tensor_to_action(self, action_tensor: torch.Tensor, game_state: GameState) -> Action:
         source_planet = int(action_tensor[0].item())
@@ -356,17 +355,22 @@ class TorchAgentGNN(PlanetWarsPlayer):
 if __name__ == "__main__":
     import cProfile
     import pstats
-    # agent_opp = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_v0.pt", use_topk_q=False)
-    agent = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_v0.pt", use_topk_q=True, topk_k=4, opponent_policy=None, exploit=False)  
+    agent_opp = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_v0.pt", use_topk_q=False)
+    agent = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path="models/cont_gamma_999_v0.pt", use_topk_q=True, topk_k=16, opponent_policy=agent_opp, exploit=False)  
     agent.prepare_to_play_as(Player.Player1, GameParams(num_planets=20))
     game_state = GameStateFactory(GameParams(num_planets=20)).create_game()
     for i in range(10):
         action = agent.get_action(game_state)
+
+
     pr = cProfile.Profile()
     pr.enable()
+
     for i in range(1000):
         action = agent.get_action(game_state)
+
+
     pr.disable()
-    ps = pstats.Stats(pr).sort_stats('tottime')
+    ps = pstats.Stats(pr).sort_stats('cumtime')
     ps.print_stats(20)
-    
+
