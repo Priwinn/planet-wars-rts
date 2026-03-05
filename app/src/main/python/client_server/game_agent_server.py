@@ -97,12 +97,18 @@ if __name__ == "__main__":
     parser.add_argument("--model_class", type=str, default="PlanetWarsAgentGNN", help="Model class name")
     parser.add_argument("--weights_path", type=str, default="models/cont_gamma_999__1765185011_final.pt", help="Path to model weights")
     parser.add_argument("--port", type=int, default=8080, help="Port to run the server on")
+    parser.add_argument("--use_topk_q", type=bool, default=False, help="Whether to use top-k OSLA")
+    parser.add_argument("--topk_k", type=int, default=5, help="Value of k for top-k OSLA")
+    parser.add_argument("--temperatures", type=str, default="1.0,1.0,1.0", help="Comma-separated list of temperatures for sampling")
+    parser.add_argument("--exploit", type=bool, default=False, help="Whether to use exploit mode (greedy action selection)")
     args = parser.parse_args()
+    args.temperatures = [float(t) for t in args.temperatures.split(",")]
+    args.temperatures = {'source': args.temperatures[0], 'target': args.temperatures[1], 'ratio': args.temperatures[2]}
     torch.set_num_threads(4)
     torch.set_num_interop_threads(4)
 
     if args.model_class == "PlanetWarsAgentGNN":
-        agent = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path=args.weights_path)  
+        agent = TorchAgentGNN(model_class=PlanetWarsAgentGNN, weights_path=args.weights_path, use_topk_q=args.use_topk_q, topk_k=args.topk_k, temperatures=args.temperatures, exploit=args.exploit)  
     elif args.model_class == "galactic":
         from agents.GalacticArmada import GalacticArmada
         agent = GalacticArmada()

@@ -251,8 +251,9 @@ class PlanetWarsAgentGNN(nn.Module):
             ratio_input = torch.zeros((num_valid_actions, (self.args.use_global_features_ratio+self.args.hierarchical_action*2)*self.hidden_dim), device=node_features.device)
 
             #Concatenate sampled action to target input
-            target_features[torch.arange(valid_batch_sum), self.args.hidden_dim:] = select(node_features, valid_batch, dim=0)
+            
             if self.args.hierarchical_action:
+                target_features[torch.arange(valid_batch_sum), self.args.hidden_dim:] = select(node_features, valid_batch, dim=0)
                 target_features[:, :self.args.hidden_dim] = node_features[source_idx].repeat_interleave(num_nodes[valid_action_idx], dim=0)  # [batches with valid actions, num_planets, node_feature_dim]
 
 

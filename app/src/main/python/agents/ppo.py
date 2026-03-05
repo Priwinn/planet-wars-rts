@@ -119,11 +119,12 @@ def make_env(env_id, idx, capture_video, run_name, device, args, self_play=None)
     return thunk
 
 def make_vector_env(env_id, capture_video, run_name, device, args, self_play=None):
-    if args.use_async:
+    if args.use_async and args.agent_type == "gnn":  
         return gym.vector.AsyncVectorEnv([make_env(env_id, i, capture_video, run_name, device, args, self_play=self_play) for i in range(args.num_envs)], shared_memory=False)
-    else:
+    elif (not args.use_async) and args.agent_type == "gnn":
         return gym.vector.SyncVectorEnv([make_env(env_id, i, capture_video, run_name, device, args, self_play=self_play) for i in range(args.num_envs)])
-
+    elif args.agent_type != "gnn":
+        return gym.vector.AsyncVectorEnv([make_env(env_id, i, capture_video, run_name, device, args) for i in range(args.num_envs)])
 class PlanetWarsActionWrapper(gym.Wrapper):
     """Wrapper to flatten the tuple action space for Planet Wars"""
 
@@ -151,7 +152,7 @@ class PlanetWarsActionWrapper(gym.Wrapper):
             self.observation_space = gym.spaces.Box(
                 low=-np.inf,
                 high=np.inf,
-                shape=(num_planets,self.node_feature_dim),
+                shape=(30,self.node_feature_dim),
                 dtype=np.float32
             )
         else:
@@ -170,6 +171,10 @@ class PlanetWarsActionWrapper(gym.Wrapper):
         # Flatten observation
         if self.flatten_observation:
             obs = obs.x
+            #Pad to max number of planets
+            if obs.shape[0] < 30:
+                padding = torch.zeros((30 - obs.shape[0], obs.shape[1]), dtype=torch.float32)
+                obs = torch.cat((obs, padding), dim=0)
         return obs, reward, done, truncated, info
 
     def reset(self, **kwargs):
@@ -579,7 +584,10 @@ if __name__ == "__main__":
         ratio_std = (b_actions[is_op, 2].std() if b_actions.shape[1] > 2 else 0.0)
         source_counts = torch.bincount(b_actions[:, 0].long(), minlength=args.num_planets_max+1)
         _obs= [o for i,o in zip(is_op, b_obs) if i]
-        target_owners = torch.Tensor([o.x[b_action[1].long().item()][0] for (o, b_action) in zip(_obs, b_actions[is_op])])
+        if not args.flatten_observation:
+            target_owners = torch.Tensor([o.x[b_action[1].long().item()][0] for (o, b_action) in zip(_obs, b_actions[is_op])])
+        else:
+            target_owners = torch.Tensor([o[int(b_action[1].long().item())][0] for (o, b_action) in zip(_obs, b_actions[is_op])])
         target_own_freq = (target_owners == 1).sum().item() / len(target_owners) if len(target_owners) > 0 else 0.0
         target_neutral_freq = (target_owners == 0).sum().item() / len(target_owners) if len(target_owners) > 0 else 0.0
         target_enemy_freq = (target_owners == 2).sum().item() / len(target_owners) if len(target_owners) > 0 else 0.0

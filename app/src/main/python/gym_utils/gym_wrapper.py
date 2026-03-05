@@ -223,7 +223,7 @@ class PlanetWarsForwardModelEnv(gym.Env):
 
         # # Validate source planet
         if source_planet >= len(planets):
-            print(f"Invalid source planet: {source_planet} for number of planets {len(planets)}")
+            # print(f"Invalid source planet: {source_planet} for number of planets {len(planets)}")
             return Action.do_nothing()
         
         source_planet_data = planets[source_planet]
@@ -258,6 +258,10 @@ class PlanetWarsForwardModelEnv(gym.Env):
         """Create graph observation from current game state"""
         planets = self.current_game_state['planets']
         node_features = torch.Tensor(np.stack([self._get_planet_features(p) for p in planets], axis=0))
+        #Pad to 30 max number of planets
+        if node_features.shape[0] < 30:
+            padding = torch.zeros((30 - node_features.shape[0], node_features.shape[1]), dtype=torch.float32)
+            node_features = torch.cat((node_features, padding), dim=0)
 
         return Data(
             x = node_features,

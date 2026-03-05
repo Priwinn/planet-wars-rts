@@ -3,7 +3,7 @@ import os
 
 @dataclass
 class Args:
-    exp_name: str = 'cont_gamma_999_128h_5lr'
+    exp_name: str = 'cont_gamma_999_mlp'
     """the name of this experiment"""
     seed: int = 1
     """seed of the experiment"""
@@ -23,15 +23,15 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "PlanetWarsForwardModel"
     """the id of the environment. Filled in runtime, either `PlanetWarsForwardModel` or `PlanetWarsForwardModelGNN` according to agent type"""
-    total_timesteps: int = 200000000
+    total_timesteps: int = 100000000
     """total timesteps of the experiments"""
-    learning_rate: float = 5e-4
+    learning_rate: float = 2e-4
     """the learning rate of the optimizer"""
     optimizer: str = "adam"
     """the optimizer to use: 'adam' or 'muon'"""
     num_envs: int = 24
     """the number of parallel game environments"""
-    num_steps: int = 2048
+    num_steps: int = 1024
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
@@ -61,7 +61,7 @@ class Args:
     """the target KL divergence threshold"""
 
     # Planet Wars specific
-    agent_type: str = "gnn"  #"gnn" only supported for now
+    agent_type: str = "mlp"  #"gnn" only supported for now
     num_planets: int = None
     """number of planets in the game. If None, will be set to a random value between num_planets_min and num_planets_max (new_map_each_run needs to be set to true)"""
     num_planets_min: int = 10
@@ -82,7 +82,7 @@ class Args:
     """whether to include zero in the discretized ratio bins"""
     new_map_each_run: bool = True
     """whether to create a new map for each run or use the same map"""
-    hidden_dim: int = 128
+    hidden_dim: int = 512
     """hidden dimension for the layers"""
     profile_path: str = None
     """Path to save profiling data, if None profiling is disabled"""
@@ -96,7 +96,7 @@ class Args:
     """if toggled, training will be resumed from the provided model weights. If false, model weights will be loaded but training will start from iteration 1"""
     gnn_layer_type: str = "gat"  # "gat", "res_gated"
     """type of gnn layer to use"""
-    hierarchical_action: bool = True
+    hierarchical_action: bool = False
     """if toggled, hierarchical action space will be used (only for gnn agent)"""  
     shared_gnn: bool = False
     """if toggled, the same gnn will be used for actor and value features (only for gnn agent)"""
